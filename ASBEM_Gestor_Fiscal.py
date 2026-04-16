@@ -2155,11 +2155,35 @@ def _exibe_totalizador(df):
             )
 
 def _exibe_grid_xml(df, grid_key):
-    st.dataframe(
+    gb = GridOptionsBuilder.from_dataframe(df)
+    gb.configure_default_column(
+        resizable=True, filter=True, sortable=True,
+        minWidth=120, width=150,
+    )
+
+    colunas_fixas = ["Número da Nota", "Data de Emissão",
+                     "Prestador Razão Social", "Prestador CNPJ/CPF",
+                     "Tomador Razão Social", "Tomador CNPJ/CPF"]
+    for col in colunas_fixas[:4]:
+        if col in df.columns:
+            gb.configure_column(col, pinned="left", width=160)
+
+    gb.configure_grid_options(
+        domLayout="normal",
+        suppressHorizontalScroll=False,
+        enableRangeSelection=True,
+        suppressColumnVirtualisation=True,
+    )
+
+    AgGrid(
         df,
-        use_container_width=True,
-        hide_index=True,
+        gridOptions=gb.build(),
         height=500,
+        key=grid_key,
+        fit_columns_on_grid_load=False,
+        enable_enterprise_modules=False,
+        update_mode=GridUpdateMode.NO_UPDATE,
+        allow_unsafe_jscode=True,
     )
 
 
@@ -2213,12 +2237,6 @@ def pagina_leitura_xml_rest():
     df, _, mapa_razao = _carrega_xml(SHEET_XML_REST, col_cnpj)
     if df is None:
         return
-
-    # DEBUG TEMPORÁRIO
-    st.write("Versão streamlit:", st.__version__)
-    import streamlit_aggrid
-    st.write("Versão aggrid:", streamlit_aggrid.__version__)
-    st.write("Total linhas df:", len(df))
 
     total_empresas = df[col_cnpj].nunique() if col_cnpj in df.columns else 0
     total_notas    = len(df)
