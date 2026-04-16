@@ -265,8 +265,8 @@ elif st.session_state["menu_area"] == "CONTÁBIL":
 else:
     paginas_disponiveis = ["EMPRESAS"]
 
-pagina = st.sidebar.radio("", paginas_disponiveis,
-                          index=0, label_visibility="collapsed")
+pagina = st.sidebar.radio("Menu", paginas_disponiveis,
+                          label_visibility="collapsed",
 
 if "pagina_atual" not in st.session_state:
     st.session_state["pagina_atual"] = pagina
@@ -302,6 +302,7 @@ def pagina_empresas():
     st.markdown(f"<p style='text-align:right; font-size:20px;'><b>Total:</b> {total_empresas} | <b>Competência:</b> {competencia}</p>", unsafe_allow_html=True)
     
     with st.container():
+        df_empresas = _sanitiza_df(df_empresas)
         exibe_aggrid(df_empresas, height=400, grid_key="grid_empresas")
     
     output = BytesIO()
@@ -481,6 +482,7 @@ def pagina_simples():
     st.divider()
 
     # ── tabela principal ──────────────────────────────────────────────────────
+    df_simples = _sanitiza_df(df_simples)
     exibe_aggrid(df_simples, height=400, grid_key="grid_simples")
 
     output = BytesIO()
@@ -655,6 +657,7 @@ def pagina_reinf():
     st.divider()
 
     # ── tabela principal ──────────────────────────────────────────────────────
+    df_reinf = _sanitiza_df(df_reinf)
     exibe_aggrid(df_reinf, height=400, grid_key="grid_reinf")
 
     output = BytesIO()
@@ -952,6 +955,7 @@ def pagina_dms():
     st.divider()
 
     # ── tabela principal ──────────────────────────────────────────────────────
+    df_dms = _sanitiza_df(df_dms)
     exibe_aggrid(df_dms, height=400, grid_key="grid_dms")
 
     output = BytesIO()
@@ -1230,6 +1234,7 @@ def pagina_rest():
     st.divider()
 
     # ── tabela principal ──────────────────────────────────────────────────────
+    df_rest = _sanitiza_df(df_rest)
     exibe_aggrid(df_rest, height=400, grid_key="grid_rest")
 
     output = BytesIO()
@@ -1476,6 +1481,7 @@ def pagina_sefaz():
     st.divider()
 
     # ── tabela principal ──────────────────────────────────────────────────────
+    df_sefaz = _sanitiza_df(df_sefaz)
     exibe_aggrid(df_sefaz, height=400, grid_key="grid_sefaz")
 
     output = BytesIO()
@@ -1603,6 +1609,7 @@ def pagina_cnd_municipal():
         st.info("💡 Selecione uma linha na tabela para visualizar o PDF correspondente.")
         
         with st.container():
+            df_cnd = _sanitiza_df(df_cnd)
             grid_response = exibe_aggrid_com_oculta(df_cnd, height=400, grid_key="grid_cnd_municipal",
                                                      selection_mode='single',
                                                      colunas_ocultas=["Situação", "LINK CND MUNICIPAL"])
@@ -1959,6 +1966,11 @@ def _carrega_xml(sheet_name, col_cnpj_filtro):
             )
         df = df[mask].copy()
 
+    # ── força string em colunas de CNPJ/CPF ──────────────────────────────────
+    for col in ["Prestador CNPJ/CPF", "Tomador CNPJ/CPF"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str)        
+
     # ── converte colunas monetárias para float ────────────────────────────────
     COLS_MONETARIAS = [
         "Valor Serviço", "Base de Cálculo", "Valor ISS",
@@ -2205,6 +2217,7 @@ def pagina_leitura_xml_dms():
 
     _exibe_totalizador(df_filtrado)
 
+    df_filtrado = _sanitiza_df(df_filtrado)
     _exibe_grid_xml(df_filtrado, "grid_xml_dms")
 
     output = BytesIO()
@@ -2243,6 +2256,7 @@ def pagina_leitura_xml_rest():
 
     _exibe_totalizador(df_filtrado)
 
+    df_filtrado = _sanitiza_df(df_filtrado)
     _exibe_grid_xml(df_filtrado, "grid_xml_rest")
 
     output = BytesIO()
@@ -2250,6 +2264,13 @@ def pagina_leitura_xml_rest():
     st.download_button("Baixar Excel", data=output.getvalue(),
                        file_name="leitura_xml_rest.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+def _sanitiza_df(df):
+    """Converte colunas mistas (texto+número) para string — evita erro Arrow."""
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].astype(str).replace("nan", "")
+    return df                       
 
 # ============================================================================
 # ROTEAMENTO
