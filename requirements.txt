@@ -1,8 +1,8 @@
-streamlit
+streamlit==1.41.0
 pandas
 numpy
 openpyxl
-streamlit-aggrid
+streamlit-aggrid==0.3.4
 requests
 gspread
 oauth2client
