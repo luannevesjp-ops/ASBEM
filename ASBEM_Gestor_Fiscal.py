@@ -266,7 +266,7 @@ else:
     paginas_disponiveis = ["EMPRESAS"]
 
 pagina = st.sidebar.radio("Menu", paginas_disponiveis,
-                          label_visibility="collapsed",
+                          label_visibility="collapsed")
 
 if "pagina_atual" not in st.session_state:
     st.session_state["pagina_atual"] = pagina
