@@ -76,6 +76,8 @@ st.markdown("""
 .menu-btn button:hover {
     background-color: #163066 !important;
 }
+.ag-body-horizontal-scroll { display: block !important; }
+.ag-body-horizontal-scroll-viewport { display: block !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -296,6 +298,7 @@ def pagina_empresas():
     
     colunas = ["Código", "Razão Social", "CNPJ", "Regime", "Município", "Estado", "Matriz / Filial", "Situação"]
     df_empresas = df_empresas[[c for c in colunas if c in df_empresas.columns]]
+    df_empresas = _sanitiza_df(df_empresas)   # ← ADICIONE AQUI
     total_empresas = df_empresas.shape[0]
     
     st.subheader("Empresas - Apenas ATIVAS")
@@ -335,7 +338,7 @@ def _modal_simples_nao_concluidas(df_show):
                  use_container_width=True, hide_index=True)
 
 
-@st.fragment
+
 def pagina_simples():
     import plotly.graph_objects as go
     st.empty()
@@ -2152,17 +2155,15 @@ def _exibe_totalizador(df):
             )
 
 def _exibe_grid_xml(df, grid_key):
-    """AgGrid com scroll horizontal e primeiras colunas congeladas."""
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(
         resizable=True, filter=True, sortable=True,
         minWidth=120, width=150,
     )
 
-    # congela as 4 primeiras colunas
     colunas_fixas = ["Número da Nota", "Data de Emissão",
                      "Prestador Razão Social", "Prestador CNPJ/CPF",
-                     "Tomador Razão Social",  "Tomador CNPJ/CPF"]
+                     "Tomador Razão Social", "Tomador CNPJ/CPF"]
     for col in colunas_fixas[:4]:
         if col in df.columns:
             gb.configure_column(col, pinned="left", width=160)
@@ -2171,6 +2172,7 @@ def _exibe_grid_xml(df, grid_key):
         domLayout="normal",
         suppressHorizontalScroll=False,
         enableRangeSelection=True,
+        suppressColumnVirtualisation=True,
     )
 
     AgGrid(
@@ -2178,11 +2180,10 @@ def _exibe_grid_xml(df, grid_key):
         gridOptions=gb.build(),
         height=500,
         key=grid_key,
-        fit_columns_on_grid_load=False,   # não comprime — permite scroll
+        fit_columns_on_grid_load=False,
         enable_enterprise_modules=False,
-        update_on=[],
+        update_mode=GridUpdateMode.NO_UPDATE,
         allow_unsafe_jscode=True,
-        reload_data=False,
     )
 
 
@@ -2266,11 +2267,11 @@ def pagina_leitura_xml_rest():
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 def _sanitiza_df(df):
-    """Converte colunas mistas (texto+número) para string — evita erro Arrow."""
+    """Converte todas as colunas para string — evita erro Arrow."""
+    df = df.copy()
     for col in df.columns:
-        if df[col].dtype == object:
-            df[col] = df[col].astype(str).replace("nan", "")
-    return df                       
+        df[col] = df[col].astype(str).replace("nan", "").replace("None", "")
+    return df                
 
 # ============================================================================
 # ROTEAMENTO
