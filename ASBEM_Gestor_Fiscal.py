@@ -2108,12 +2108,6 @@ def _filtros_xml(df, col_cnpj, mapa_razao, formata_cnpj=True, page_id="rest"):
         if selecionados and col in df_f.columns:
             df_f = df_f[df_f[col].astype(str).isin(selecionados)]
 
-    # DEBUG — remover depois
-    st.write("Linhas antes do filtro:", len(df))
-    st.write("Empresa selecionada:", sel_emp)
-    st.write("Situação selecionada:", sel_sit)
-    st.write("Linhas após filtro:", len(df_f))
-
     return df_f
 
 
