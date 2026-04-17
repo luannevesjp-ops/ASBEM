@@ -328,6 +328,14 @@ def _normaliza_cnpj(val):
     return digits.zfill(14)
 
 
+def _formata_cnpj_mascara(val):
+    """00000000000000 → 00.000.000/0000-00"""
+    digits = re.sub(r'\D', '', str(val))
+    if len(digits) == 15:
+        digits = digits[:14]
+    digits = digits.zfill(14)
+    return f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/{digits[8:12]}-{digits[12:14]}"
+
 @st.dialog("Simples Nacional — Não Concluídas")
 def _modal_simples_nao_concluidas(df_show):
     st.markdown(f"**{df_show.shape[0]} empresa(s) não concluída(s)**")
@@ -1654,8 +1662,10 @@ def _estado_original(s):
 def _modal_dashboard(titulo, df_show, colunas):
     st.markdown(f"**{titulo}** — {df_show.shape[0]} empresa(s)")
     cols_ok = [c for c in colunas if c in df_show.columns]
-    st.dataframe(df_show[cols_ok].reset_index(drop=True),
-                 use_container_width=True, hide_index=True)
+    df_exib = df_show[cols_ok].reset_index(drop=True).copy()
+    if "CNPJ" in df_exib.columns:
+        df_exib["CNPJ"] = df_exib["CNPJ"].apply(_formata_cnpj_mascara)
+    st.dataframe(df_exib, use_container_width=True, hide_index=True)
 
 
 @st.fragment
@@ -1707,6 +1717,7 @@ def pagina_dashboard_paralegal():
         fig_est.update_traces(
             textposition="outside",
             hovertemplate="<b>%{customdata[0]}</b><br>Qtd: %{y}<extra></extra>",
+            width=0.5,
         )
         fig_est.update_layout(
             plot_bgcolor="white", paper_bgcolor="white",
@@ -1716,6 +1727,8 @@ def pagina_dashboard_paralegal():
             margin=dict(t=30, b=20, l=10, r=10),
             height=350,
             clickmode="event+select",
+            bargap=0.1,          # ← ADICIONE
+            bargroupgap=0.0,     # ← ADICIONE
         )
 
         ev_est = st.plotly_chart(fig_est, use_container_width=True,
