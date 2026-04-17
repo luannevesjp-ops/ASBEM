@@ -1702,38 +1702,37 @@ def pagina_dashboard_paralegal():
     st.caption("Clique em uma barra para ver as empresas")
 
     if "Estado" in df_ativas.columns:
-            df_est = df_ativas["Estado"].fillna("N/I").astype(str).str.strip()
-            df_est_count = df_est.value_counts().reset_index()
-            df_est_count.columns = ["Estado_orig", "Quantidade"]
-            df_est_count["Estado"] = df_est_count["Estado_orig"].apply(_formata_estado)
+        df_est = df_ativas["Estado"].fillna("N/I").astype(str).str.strip()
+        df_est_count = df_est.value_counts().reset_index()
+        df_est_count.columns = ["Estado_orig", "Quantidade"]
+        df_est_count["Estado"] = df_est_count["Estado_orig"].apply(_formata_estado)
 
-            # altura mínima de 3% da maior barra para barras pequenas ficarem clicáveis
-            df_est_count["Qtd_display"] = df_est_count["Quantidade"].apply(
-                lambda x: max(x, df_est_count["Quantidade"].max() * 0.03)
-            )
+        df_est_count["Qtd_display"] = df_est_count["Quantidade"].apply(
+            lambda x: max(x, df_est_count["Quantidade"].max() * 0.03)
+        )
 
-            fig_est = px.bar(
-                df_est_count, x="Estado", y="Qtd_display",
-                color="Qtd_display",
-                color_continuous_scale=[[0, "#4a90d9"], [1, "#1d3f77"]],
-                text="Quantidade",
-                custom_data=["Estado_orig", "Quantidade"],
-            )
-            fig_est.update_traces(
-                textposition="outside",
-                hovertemplate="<b>%{customdata[0]}</b><br>Qtd: %{customdata[1]}<extra></extra>",
-            )
-            fig_est.update_layout(
-                plot_bgcolor="white", paper_bgcolor="white",
-                coloraxis_showscale=False,
-                xaxis=dict(title="", tickfont=dict(size=13), showgrid=False),
-                yaxis=dict(title="", showgrid=False, zeroline=False),
-                margin=dict(t=30, b=20, l=10, r=10),
-                height=350,
-                clickmode="event+select",
-                bargap=0.1,
-                bargroupgap=0.0,
-            )
+        fig_est = px.bar(
+            df_est_count, x="Estado", y="Qtd_display",
+            color="Qtd_display",
+            color_continuous_scale=[[0, "#4a90d9"], [1, "#1d3f77"]],
+            text="Quantidade",
+            custom_data=["Estado_orig", "Quantidade"],
+        )
+        fig_est.update_traces(
+            textposition="outside",
+            hovertemplate="<b>%{customdata[0]}</b><br>Qtd: %{customdata[1]}<extra></extra>",
+        )
+        fig_est.update_layout(
+            plot_bgcolor="white", paper_bgcolor="white",
+            coloraxis_showscale=False,
+            xaxis=dict(title="", tickfont=dict(size=13), showgrid=False),
+            yaxis=dict(title="", showgrid=False, zeroline=False),
+            margin=dict(t=30, b=20, l=10, r=10),
+            height=350,
+            clickmode="event+select",
+            bargap=0.1,
+            bargroupgap=0.0,
+        )
             margin=dict(t=30, b=20, l=10, r=10),
             height=350,
             clickmode="event+select",
