@@ -2354,7 +2354,7 @@ def pagina_sem_acesso():
 
     # ── eCAC — SIMPLES, REINF, DCTF WEB ──────────────────────────────────────
     ecac_masks = []
-    for col in ["SIMPLES GERADO", "TRANSMISSÃO REINF", "SITUAÇÃO DCTF"]:
+    for col in ["MOTIVO SITUAÇÃO DO DAS", "MOTIVO SITUAÇÃO REINF", "MOTIVO SITUAÇÃO DCTF WEB"]:
         if col in df_ativas.columns:
             ecac_masks.append(
                 df_ativas[col].astype(str).str.upper().str.contains("PROCURA", na=False)
