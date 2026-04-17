@@ -1733,12 +1733,6 @@ def pagina_dashboard_paralegal():
             bargap=0.1,
             bargroupgap=0.0,
         )
-            margin=dict(t=30, b=20, l=10, r=10),
-            height=350,
-            clickmode="event+select",
-            bargap=0.1,
-            bargroupgap=0.0,
-        )
 
         ev_est = st.plotly_chart(fig_est, use_container_width=True,
                                   on_select="rerun", key="chart_estado")
