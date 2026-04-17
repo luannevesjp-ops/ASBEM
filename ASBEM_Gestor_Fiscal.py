@@ -262,7 +262,7 @@ if st.session_state["menu_area"] == "FISCAL":
                            "DMS", "SERVIÇOS TOMADOS", "SEFAZ", "LEITURA XML DMS", "LEITURA XML REST"]
 
 elif st.session_state["menu_area"] == "PARALEGAL":
-    paginas_disponiveis = ["Dashboard", "EMPRESAS", "CND Municipal"]
+    paginas_disponiveis = ["DASHBOARD", "EMPRESAS", "CND MUNICIPAL", "SEM ACESSO"]
 
 elif st.session_state["menu_area"] == "CONTÁBIL":
     paginas_disponiveis = ["EMPRESAS"]
@@ -2296,12 +2296,212 @@ def _sanitiza_df(df):
         df[col] = df[col].astype(str).replace("nan", "").replace("None", "")
     return df                
 
+@st.dialog("Prefeitura — DMS Sem Acesso")
+def _modal_sem_acesso_dms(df_show):
+    st.markdown(f"**{df_show.shape[0]} empresa(s)**")
+    st.dataframe(df_show.reset_index(drop=True), use_container_width=True, hide_index=True)
+
+@st.dialog("SEFAZ — Sem Acesso")
+def _modal_sem_acesso_sefaz(df_show):
+    st.markdown(f"**{df_show.shape[0]} empresa(s)**")
+    st.dataframe(df_show.reset_index(drop=True), use_container_width=True, hide_index=True)
+
+@st.dialog("eCAC — Sem Procuração")
+def _modal_sem_acesso_ecac(df_show):
+    st.markdown(f"**{df_show.shape[0]} empresa(s)**")
+    st.dataframe(df_show.reset_index(drop=True), use_container_width=True, hide_index=True)
+
+
+@st.fragment
+def pagina_sem_acesso():
+    import plotly.graph_objects as go
+    st.empty()
+
+    df = le_planilha_google(GOOGLE_SHEET_URL, SHEET_EMPRESAS)
+    if df is None:
+        return
+
+    df_ativas = df[df["Situação"].astype(str).str.upper() == "ATIVA"].copy()
+    if df_ativas.empty:
+        st.warning("Nenhuma empresa ATIVA encontrada.")
+        return
+
+    # ── colunas base para exibição ────────────────────────────────────────────
+    COLS_BASE = ["Código", "Razão Social", "CNPJ"]
+
+    def _prepara(df_fil):
+        cols = [c for c in COLS_BASE if c in df_fil.columns]
+        d = df_fil[cols].copy()
+        if "CNPJ" in d.columns:
+            d["CNPJ"] = d["CNPJ"].apply(_formata_cnpj_mascara)
+        return d.reset_index(drop=True)
+
+    # ── PREFEITURA — DMS ──────────────────────────────────────────────────────
+    col_dms = "DMS"
+    if col_dms in df_ativas.columns:
+        mask_dms = df_ativas[col_dms].astype(str).str.upper().str.contains("SEM ACESSO", na=False)
+        df_dms_sa = _prepara(df_ativas[mask_dms])
+    else:
+        df_dms_sa = pd.DataFrame(columns=COLS_BASE)
+
+    # ── SEFAZ ─────────────────────────────────────────────────────────────────
+    col_sefaz = "IMPORTAÇÃO"
+    if col_sefaz in df_ativas.columns:
+        mask_sefaz = df_ativas[col_sefaz].astype(str).str.upper().str.contains("SEM ACESSO", na=False)
+        df_sefaz_sa = _prepara(df_ativas[mask_sefaz])
+    else:
+        df_sefaz_sa = pd.DataFrame(columns=COLS_BASE)
+
+    # ── eCAC — SIMPLES, REINF, DCTF WEB ──────────────────────────────────────
+    ecac_masks = []
+    for col in ["SIMPLES GERADO", "TRANSMISSÃO REINF", "SITUAÇÃO DCTF"]:
+        if col in df_ativas.columns:
+            ecac_masks.append(
+                df_ativas[col].astype(str).str.upper().str.contains("PROCURA", na=False)
+            )
+
+    if ecac_masks:
+        mask_ecac = ecac_masks[0]
+        for m in ecac_masks[1:]:
+            mask_ecac = mask_ecac | m
+        df_ecac_sa = _prepara(df_ativas[mask_ecac])
+    else:
+        df_ecac_sa = pd.DataFrame(columns=COLS_BASE)
+
+    # ── cabeçalho ─────────────────────────────────────────────────────────────
+    st.markdown("<h2>SEM ACESSO</h2>", unsafe_allow_html=True)
+    st.markdown(
+        f"<p style='text-align:right; font-size:18px;'>"
+        f"<b>Prefeitura:</b> {len(df_dms_sa)} &nbsp;|&nbsp; "
+        f"<b>SEFAZ:</b> {len(df_sefaz_sa)} &nbsp;|&nbsp; "
+        f"<b>eCAC:</b> {len(df_ecac_sa)}</p>",
+        unsafe_allow_html=True,
+    )
+
+    # ── session keys ──────────────────────────────────────────────────────────
+    for k in ["sa_chart_key"]:
+        if k not in st.session_state:
+            st.session_state[k] = 0
+
+    # ── três donuts lado a lado ───────────────────────────────────────────────
+    total_geral = len(df_ativas)
+    col1, col2, col3 = st.columns(3)
+
+    def _donut(titulo, qtd_sa, total, cor_sa, cor_ok):
+        qtd_ok = max(total - qtd_sa, 0)
+        fig = go.Figure(data=[go.Pie(
+            labels=["Sem Acesso", "Com Acesso"],
+            values=[int(qtd_sa), int(qtd_ok)],
+            hole=0.68,
+            marker=dict(colors=[cor_sa, cor_ok], line=dict(color="#ffffff", width=3)),
+            textinfo="none",
+            hovertemplate="<b>%{label}</b><br>%{value} empresa(s)<extra></extra>",
+            direction="clockwise",
+            sort=False,
+        )])
+        fig.update_layout(
+            paper_bgcolor="white", plot_bgcolor="white",
+            showlegend=False,
+            margin=dict(t=10, b=10, l=10, r=10),
+            height=220,
+            annotations=[dict(
+                text=f"<b>{qtd_sa}</b><br><span style='font-size:10px'>sem acesso</span>",
+                x=0.5, y=0.5, xanchor="center", yanchor="middle",
+                showarrow=False,
+                font=dict(size=18, color="#1d3f77"),
+            )],
+        )
+        return fig
+
+    with col1:
+        st.markdown("<h4 style='text-align:center; color:#1d3f77;'>Prefeitura</h4>",
+                    unsafe_allow_html=True)
+        st.plotly_chart(_donut("Prefeitura", len(df_dms_sa), total_geral,
+                               "#c0392b", "#bdc3c7"),
+                        use_container_width=True,
+                        key=f"chart_sa_dms_{st.session_state['sa_chart_key']}")
+        pct = round(len(df_dms_sa) / total_geral * 100) if total_geral else 0
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#fdedec; "
+            f"border-radius:8px; border-left:4px solid #c0392b;'>"
+            f"<span style='font-size:20px; font-weight:700; color:#c0392b;'>{len(df_dms_sa)}</span><br>"
+            f"<span style='font-size:12px; color:#555;'>DMS Sem Acesso ({pct}%)</span></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Ver empresas", key="btn_sa_dms", use_container_width=True):
+            _modal_sem_acesso_dms(df_dms_sa)
+
+    with col2:
+        st.markdown("<h4 style='text-align:center; color:#1d3f77;'>SEFAZ</h4>",
+                    unsafe_allow_html=True)
+        st.plotly_chart(_donut("SEFAZ", len(df_sefaz_sa), total_geral,
+                               "#e67e22", "#bdc3c7"),
+                        use_container_width=True,
+                        key=f"chart_sa_sefaz_{st.session_state['sa_chart_key']}")
+        pct = round(len(df_sefaz_sa) / total_geral * 100) if total_geral else 0
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#fdf3e7; "
+            f"border-radius:8px; border-left:4px solid #e67e22;'>"
+            f"<span style='font-size:20px; font-weight:700; color:#e67e22;'>{len(df_sefaz_sa)}</span><br>"
+            f"<span style='font-size:12px; color:#555;'>SEFAZ Sem Acesso ({pct}%)</span></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Ver empresas", key="btn_sa_sefaz", use_container_width=True):
+            _modal_sem_acesso_sefaz(df_sefaz_sa)
+
+    with col3:
+        st.markdown("<h4 style='text-align:center; color:#1d3f77;'>eCAC</h4>",
+                    unsafe_allow_html=True)
+        st.plotly_chart(_donut("eCAC", len(df_ecac_sa), total_geral,
+                               "#8e44ad", "#bdc3c7"),
+                        use_container_width=True,
+                        key=f"chart_sa_ecac_{st.session_state['sa_chart_key']}")
+        pct = round(len(df_ecac_sa) / total_geral * 100) if total_geral else 0
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#f5eef8; "
+            f"border-radius:8px; border-left:4px solid #8e44ad;'>"
+            f"<span style='font-size:20px; font-weight:700; color:#8e44ad;'>{len(df_ecac_sa)}</span><br>"
+            f"<span style='font-size:12px; color:#555;'>eCAC Sem Procuração ({pct}%)</span></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Ver empresas", key="btn_sa_ecac", use_container_width=True):
+            _modal_sem_acesso_ecac(df_ecac_sa)
+
+    st.divider()
+
+    # ── lista geral ───────────────────────────────────────────────────────────
+    st.markdown("### Lista Geral — Todas as pendências", unsafe_allow_html=True)
+
+    df_dms_sa["Origem"] = "DMS — Prefeitura"
+    df_sefaz_sa["Origem"] = "SEFAZ"
+    df_ecac_sa["Origem"] = "eCAC"
+
+    df_geral_sa = pd.concat([df_dms_sa, df_sefaz_sa, df_ecac_sa], ignore_index=True)
+
+    if not df_geral_sa.empty:
+        df_geral_sa = _sanitiza_df(df_geral_sa)
+        exibe_aggrid(df_geral_sa, height=400, grid_key="grid_sem_acesso")
+
+        output = BytesIO()
+        df_geral_sa.to_excel(output, index=False)
+        st.download_button(
+            "Baixar Excel", data=output.getvalue(),
+            file_name="sem_acesso.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    else:
+        st.success("Nenhuma pendência encontrada!")
+
+
 # ============================================================================
 # ROTEAMENTO
 # ============================================================================
 
 with st.session_state.main_container.container():
-    if pagina == "Dashboard":
+    if pagina == "DASHBOARD":
         pagina_dashboard_paralegal()
     elif pagina == "EMPRESAS":
         pagina_empresas()
@@ -2321,5 +2521,7 @@ with st.session_state.main_container.container():
         pagina_leitura_xml_dms()
     elif pagina == "LEITURA XML REST":
         pagina_leitura_xml_rest()    
-    elif pagina == "CND Municipal":
+    elif pagina == "CND MUNICIPAL":
         pagina_cnd_municipal()
+    elif pagina == "SEM ACESSO":
+        pagina_sem_acesso()
