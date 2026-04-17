@@ -78,6 +78,9 @@ st.markdown("""
 }
 .ag-body-horizontal-scroll { display: block !important; }
 .ag-body-horizontal-scroll-viewport { display: block !important; }
+.ag-root-wrapper { overflow: visible !important; }
+.ag-body-horizontal-scroll { opacity: 1 !important; height: 16px !important; }
+.ag-body-horizontal-scroll-viewport { overflow-x: scroll !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -2176,6 +2179,7 @@ def _exibe_grid_xml(df, grid_key):
         suppressHorizontalScroll=False,
         enableRangeSelection=True,
         suppressColumnVirtualisation=True,
+        alwaysShowHorizontalScroll=True, 
     )
 
     AgGrid(
