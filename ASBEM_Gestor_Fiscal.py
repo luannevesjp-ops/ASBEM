@@ -1717,18 +1717,27 @@ def pagina_dashboard_paralegal():
         fig_est.update_traces(
             textposition="outside",
             hovertemplate="<b>%{customdata[0]}</b><br>Qtd: %{y}<extra></extra>",
-            width=0.5,
+            marker=dict(
+                color=df_est_count["Quantidade"],
+                colorscale=[[0, "#4a90d9"], [1, "#1d3f77"]],
+                line=dict(width=0),
+            ),
         )
         fig_est.update_layout(
             plot_bgcolor="white", paper_bgcolor="white",
             coloraxis_showscale=False,
             xaxis=dict(title="", tickfont=dict(size=13), showgrid=False),
-            yaxis=dict(title="", showgrid=False, zeroline=False),
+            yaxis=dict(
+                title="",
+                showgrid=False,
+                zeroline=False,
+                range=[0, max(df_est_count["Quantidade"].max() * 1.3, 3)],
+            ),
             margin=dict(t=30, b=20, l=10, r=10),
             height=350,
             clickmode="event+select",
-            bargap=0.1,          # ← ADICIONE
-            bargroupgap=0.0,     # ← ADICIONE
+            bargap=0.1,
+            bargroupgap=0.0,
         )
 
         ev_est = st.plotly_chart(fig_est, use_container_width=True,
