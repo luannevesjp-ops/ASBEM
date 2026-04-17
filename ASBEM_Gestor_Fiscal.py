@@ -1717,7 +1717,7 @@ def pagina_dashboard_paralegal():
         fig_est.update_traces(
             textposition="outside",
             hovertemplate="<b>%{customdata[0]}</b><br>Qtd: %{y}<extra></extra>",
-            width=1.5,
+            width=0.5,
         )
         fig_est.update_layout(
             plot_bgcolor="white", paper_bgcolor="white",
