@@ -16,7 +16,7 @@ import base64
 # CONFIGURAÇÕES INICIAIS
 # ============================================================================
 
-st.set_page_config(page_title="LuaTech - Gestão Fiscal", layout="wide")
+st.set_page_config(page_title="LUATECH-GESTÃO-ASBEM", layout="wide")
 
 if 'main_container' not in st.session_state:
     st.session_state.main_container = st.empty()
