@@ -2161,6 +2161,9 @@ def _exibe_totalizador(df):
             )
 
 def _exibe_grid_xml(df, grid_key):
+    import hashlib
+    hash_key = hashlib.md5(str(df.shape).encode() + str(df.index.tolist()).encode()).hexdigest()[:8]
+
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(
         resizable=True, filter=True, sortable=True,
@@ -2185,7 +2188,7 @@ def _exibe_grid_xml(df, grid_key):
         df,
         gridOptions=gb.build(),
         height=500,
-        key=grid_key,
+        key=f"{grid_key}_{hash_key}",
         fit_columns_on_grid_load=False,
         enable_enterprise_modules=False,
         update_mode=GridUpdateMode.NO_UPDATE,
