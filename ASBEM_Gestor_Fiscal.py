@@ -25,6 +25,7 @@ GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1uuNhoIYTbAECnlEw64eF
 SHEET_EMPRESAS = "GERAL"
 SHEET_XML_DMS  = "Leitura Xml DMS"
 SHEET_XML_REST = "Leitura Xml REST"
+SHEET_SEFAZ = "SEFAZ"
 
 # ============================================================================
 # CSS E ESTILOS
@@ -259,7 +260,7 @@ st.sidebar.markdown("<hr style='margin: 8px 0;'>", unsafe_allow_html=True)
 # Define as páginas disponíveis por área
 if st.session_state["menu_area"] == "FISCAL":
     paginas_disponiveis = ["EMPRESAS", "SIMPLES NACIONAL", "REINF", "DCTF WEB",
-                           "DMS", "SERVIÇOS TOMADOS", "SEFAZ", "LEITURA XML DMS", "LEITURA XML REST"]
+                           "DMS", "SERVIÇOS TOMADOS", "SEFAZ", "LEITURA XML DMS", "LEITURA XML REST","SEFAZ COMPARAÇÃO"]
 
 elif st.session_state["menu_area"] == "PARALEGAL":
     paginas_disponiveis = ["DASHBOARD", "EMPRESAS", "CND MUNICIPAL", "SEM ACESSO"]
@@ -2496,6 +2497,236 @@ def pagina_sem_acesso():
         st.success("Nenhuma pendência encontrada!")
 
 
+@st.dialog("SEFAZ COMPARAÇÃO — Divergências")
+def _modal_sefaz_comparacao(df_show):
+    st.markdown(f"**{df_show.shape[0]} empresa(s) com divergência**")
+    st.dataframe(df_show.reset_index(drop=True), use_container_width=True, hide_index=True)
+
+
+@st.fragment
+def pagina_sefaz_comparacao():
+    import plotly.graph_objects as go
+    st.empty()
+
+    # ── carrega aba SEFAZ ─────────────────────────────────────────────────────
+    try:
+        resp = requests.get(GOOGLE_SHEET_URL)
+        resp.raise_for_status()
+        df_sefaz = pd.read_excel(
+            BytesIO(resp.content),
+            sheet_name=SHEET_SEFAZ,
+            engine="openpyxl",
+            header=0,
+        )
+    except Exception as e:
+        st.error(f"Erro ao ler aba SEFAZ: {e}")
+        return
+
+    df_sefaz.columns = df_sefaz.columns.str.strip()
+
+    # ── carrega aba GERAL para pegar Nome e CNPJ ──────────────────────────────
+    df_geral = le_planilha_google(GOOGLE_SHEET_URL, SHEET_EMPRESAS)
+    if df_geral is None:
+        return
+
+    df_geral = df_geral.copy()
+    if "CNPJ" in df_geral.columns:
+        df_geral["CNPJ_fmt"] = df_geral["CNPJ"].apply(_formata_cnpj_mascara)
+    if "Código" in df_geral.columns:
+        df_geral["Código"] = df_geral["Código"].astype(str).str.strip()
+
+    mapa_empresa = {}
+    for _, row in df_geral.iterrows():
+        cod = str(row.get("Código", "")).strip()
+        if cod:
+            mapa_empresa[cod] = {
+                "Razão Social": row.get("Razão Social", ""),
+                "CNPJ": row.get("CNPJ_fmt", ""),
+                "Insc. Estadual":  row.get("Insc. Estadual", ""),
+            }
+
+    # ── identifica colunas por posição ───────────────────────────────────────
+    # A=0, D=3, T=19, W=22
+    cols = df_sefaz.columns.tolist()
+
+    def _col(idx):
+        return cols[idx] if idx < len(cols) else None
+
+    nome_cod_a  = _col(0)   # A — CÓDIGO
+    nome_said_d = _col(3)   # D — SAÍDAS
+    nome_cod_t  = _col(19)  # T — CÓDIGO
+    nome_said_w = _col(22)  # W — SAÍDAS
+
+    if not all([nome_cod_a, nome_said_d, nome_cod_t, nome_said_w]):
+        st.error("Colunas A, D, T ou W não encontradas na aba SEFAZ.")
+        return
+
+    # ── normaliza e converte ──────────────────────────────────────────────────
+    # ── normaliza códigos — remove .0 ────────────────────────────────────────
+    def _limpa_codigo(val):
+        s = str(val).strip()
+        if s.endswith(".0"):
+            s = s[:-2]
+        return s.upper().replace("NAN", "").strip()
+
+    df_sefaz[nome_cod_a] = df_sefaz[nome_cod_a].apply(_limpa_codigo)
+    df_sefaz[nome_cod_t] = df_sefaz[nome_cod_t].apply(_limpa_codigo)
+    df_sefaz[nome_said_d] = df_sefaz[nome_said_d].apply(_limpa_numero)
+    df_sefaz[nome_said_w] = df_sefaz[nome_said_w].apply(_limpa_numero)
+
+    # ── filtra linhas válidas de cada lado ────────────────────────────────────
+    df_lado_a = df_sefaz[df_sefaz[nome_cod_a] != ""][
+        [nome_cod_a, nome_said_d]
+    ].copy()
+    df_lado_a.columns = ["Código", "Saídas_A"]
+
+    df_lado_t = df_sefaz[df_sefaz[nome_cod_t] != ""][
+        [nome_cod_t, nome_said_w]
+    ].copy()
+    df_lado_t.columns = ["Código", "Saídas_T"]
+
+    # ── agrupa por código (soma caso haja duplicatas) ─────────────────────────
+    df_lado_a = df_lado_a.groupby("Código", as_index=False)["Saídas_A"].sum()
+    df_lado_t = df_lado_t.groupby("Código", as_index=False)["Saídas_T"].sum()
+
+    # ── junta pelos códigos ───────────────────────────────────────────────────
+    df_merge = pd.merge(df_lado_a, df_lado_t, on="Código", how="outer").fillna(0)
+
+    # ── compara ───────────────────────────────────────────────────────────────
+    df_merge["Diferença"] = df_merge["Saídas_A"] - df_merge["Saídas_T"]
+    df_dif  = df_merge[df_merge["Diferença"] != 0].copy()
+    df_ok   = df_merge[df_merge["Diferença"] == 0].copy()
+
+    # ── monta df de exibição com Nome e CNPJ da GERAL ─────────────────────────
+    def _enriquece(df_in):
+        rows = []
+        for _, row in df_in.iterrows():
+            cod = str(row["Código"]).strip()
+            emp = mapa_empresa.get(cod, {})
+
+            def _fmt_valor(v):
+                try:
+                    f = float(v)
+                    if f == int(f):
+                        return int(f)
+                    return round(f, 2)
+                except:
+                    return v
+
+            rows.append({
+                "Código":          cod,
+                "Razão Social":    emp.get("Razão Social", ""),
+                "CNPJ":            emp.get("CNPJ", ""),
+                "Insc. Estadual":  emp.get("Insc. Estadual", ""),
+                "Saídas Inicial":  _fmt_valor(row["Saídas_A"]),
+                "Saídas Final":    _fmt_valor(row["Saídas_T"]),
+                "Diferença":       _fmt_valor(row["Diferença"]),
+            })
+        return pd.DataFrame(rows)
+
+    df_result = _enriquece(df_dif)
+
+    total_empresas = len(df_merge)
+    total_dif      = len(df_result)
+    total_ok       = len(df_ok)
+
+    # ── cabeçalho ─────────────────────────────────────────────────────────────
+    st.markdown("<h2>SEFAZ COMPARAÇÃO</h2>", unsafe_allow_html=True)
+    st.markdown(
+        f"<p style='text-align:right; font-size:20px;'>"
+        f"<b>Com divergência:</b> {total_dif} &nbsp;|&nbsp; "
+        f"<b>Sem divergência:</b> {total_ok} &nbsp;|&nbsp; "
+        f"<b>Total:</b> {total_empresas}</p>",
+        unsafe_allow_html=True,
+    )
+
+    # ── donut ─────────────────────────────────────────────────────────────────
+    if "sefaz_comp_key" not in st.session_state:
+        st.session_state["sefaz_comp_key"] = 0
+
+    pct_dif = round(total_dif / total_empresas * 100) if total_empresas else 0
+    pct_ok  = round(total_ok  / total_empresas * 100) if total_empresas else 0
+
+    fig = go.Figure(data=[go.Pie(
+        labels=["Com Divergência", "Sem Divergência"],
+        values=[int(total_dif), int(total_ok)],
+        hole=0.68,
+        marker=dict(
+            colors=["#c0392b", "#27ae60"],
+            line=dict(color="#ffffff", width=3),
+        ),
+        textinfo="none",
+        hovertemplate="<b>%{label}</b><br>%{value} empresa(s) — %{percent}<extra></extra>",
+        direction="clockwise",
+        sort=False,
+    )])
+    fig.update_layout(
+        paper_bgcolor="white", plot_bgcolor="white",
+        showlegend=False,
+        margin=dict(t=20, b=20, l=20, r=20),
+        height=300,
+        annotations=[dict(
+            text=f"<b>{total_empresas}</b><br><span style='font-size:11px'>empresas</span>",
+            x=0.5, y=0.5,
+            xanchor="center", yanchor="middle",
+            showarrow=False,
+            font=dict(size=22, color="#1d3f77"),
+        )],
+    )
+
+    col_esq, col_centro, col_dir = st.columns([1, 2, 1])
+    with col_centro:
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key=f"chart_sefaz_comp_{st.session_state['sefaz_comp_key']}",
+        )
+
+    col_l, col_r = st.columns(2)
+    with col_l:
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#fdedec; "
+            f"border-radius:8px; border-left:4px solid #c0392b;'>"
+            f"<span style='font-size:22px; font-weight:700; color:#c0392b;'>{total_dif}</span><br>"
+            f"<span style='font-size:13px; color:#555;'>Com Divergência ({pct_dif}%)</span></div>",
+            unsafe_allow_html=True,
+        )
+    with col_r:
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#eafaf1; "
+            f"border-radius:8px; border-left:4px solid #27ae60;'>"
+            f"<span style='font-size:22px; font-weight:700; color:#27ae60;'>{total_ok}</span><br>"
+            f"<span style='font-size:13px; color:#555;'>Sem Divergência ({pct_ok}%)</span></div>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("Ver empresas com divergência", use_container_width=True,
+                 key="btn_sefaz_comp_dif"):
+        if not df_result.empty:
+            _modal_sefaz_comparacao(df_result)
+        else:
+            st.info("Nenhuma divergência encontrada!")
+
+    st.divider()
+
+    # ── lista ─────────────────────────────────────────────────────────────────
+    st.markdown("### Lista de Divergências", unsafe_allow_html=True)
+
+    if not df_result.empty:
+        df_exib = _sanitiza_df(df_result)
+        exibe_aggrid(df_exib, height=400, grid_key="grid_sefaz_comp")
+
+        output = BytesIO()
+        df_result.to_excel(output, index=False)
+        st.download_button(
+            "Baixar Excel", data=output.getvalue(),
+            file_name="sefaz_comparacao.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    else:
+        st.success("Nenhuma divergência encontrada entre as colunas!")
+
 # ============================================================================
 # ROTEAMENTO
 # ============================================================================
@@ -2525,3 +2756,5 @@ with st.session_state.main_container.container():
         pagina_cnd_municipal()
     elif pagina == "SEM ACESSO":
         pagina_sem_acesso()
+    elif pagina == "SEFAZ COMPARAÇÃO":
+        pagina_sefaz_comparacao()    
