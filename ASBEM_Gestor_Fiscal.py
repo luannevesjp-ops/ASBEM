@@ -15,6 +15,15 @@ import json
 from pathlib import Path
 from datetime import date
 
+# Tkinter só existe em ambientes com display (execução local). No Streamlit Cloud não está disponível.
+try:
+    import tkinter as _tk_test
+    _tk_test.Tk().destroy()
+    _TKINTER_OK = True
+    del _tk_test
+except Exception:
+    _TKINTER_OK = False
+
 # ============================================================================
 # CONFIGURAÇÕES INICIAIS
 # ============================================================================
@@ -24,11 +33,12 @@ st.set_page_config(page_title="LUATECH-GESTÃO-ASBEM", layout="wide")
 if 'main_container' not in st.session_state:
     st.session_state.main_container = st.empty()
 
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1uuNhoIYTbAECnlEw64eFSKD558WCcCXpIqcJAQsgSSM/export?format=xlsx"
-SHEET_EMPRESAS = "GERAL"
-SHEET_XML_DMS  = "Leitura Xml DMS"
-SHEET_XML_REST = "Leitura Xml REST"
-SHEET_SEFAZ = "SEFAZ"
+SHEET_ID         = "1uuNhoIYTbAECnlEw64eFSKD558WCcCXpIqcJAQsgSSM"
+GOOGLE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx"
+SHEET_EMPRESAS   = "GERAL"
+SHEET_XML_DMS    = "Leitura Xml DMS"
+SHEET_XML_REST   = "Leitura Xml REST"
+SHEET_SEFAZ      = "SEFAZ"
 SHEET_CERT_ABA   = "CERTIFICADOS"
 SHEET_EMAIL_ABA  = "EMAIL"
 SHEET_MSG_ABA    = "MENSAGEM"
@@ -199,7 +209,8 @@ _COLS_CERT  = ["arquivo", "nome_arquivo", "senha", "razao_social", "cnpj", "vali
 _COLS_EMAIL = ["cnpj", "emails"]
 _COLS_MSG   = ["tipo", "mensagem"]
 
-# URL do Apps Script publicado como Web App na planilha Google da ASBEM
+# URL do Apps Script publicado como Web App na planilha Google
+# (após publicar o script, cole a URL aqui)
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwhVYNHqlrUOYsmnUMvvAbEy2KW5MZToo0jwsMNRdN3-69LhAgyKJ4ytR185SdWyNWB/exec"
 
 
@@ -398,6 +409,33 @@ def _cert_ler_pfx(fonte, senha: str):
         venc = cert.not_valid_after.replace(tzinfo=timezone.utc)
 
     return razao, documento, venc.strftime("%d/%m/%Y"), venc.strftime("%Y-%m-%d")
+
+
+def _picker_pasta_cert():
+    import tkinter as tk
+    from tkinter import filedialog
+    root = tk.Tk()
+    root.withdraw()
+    root.wm_attributes("-topmost", True)
+    root.lift()
+    pasta = filedialog.askdirectory(title="Selecione a pasta com certificados .pfx")
+    root.destroy()
+    return pasta or ""
+
+
+def _picker_arquivo_cert():
+    import tkinter as tk
+    from tkinter import filedialog
+    root = tk.Tk()
+    root.withdraw()
+    root.wm_attributes("-topmost", True)
+    root.lift()
+    arquivo = filedialog.askopenfilename(
+        title="Selecione o certificado .pfx",
+        filetypes=[("Certificado Digital", "*.pfx"), ("Todos os arquivos", "*.*")],
+    )
+    root.destroy()
+    return arquivo or ""
 
 
 def _extrair_senha_nome(nome_arquivo: str) -> str:
@@ -1016,12 +1054,34 @@ def pagina_empresas():
     
     colunas = ["Código", "Razão Social", "CNPJ", "Regime", "Município", "Estado", "Matriz / Filial", "Situação"]
     df_empresas = df_empresas[[c for c in colunas if c in df_empresas.columns]]
-    df_empresas = _sanitiza_df(df_empresas)   # ← ADICIONE AQUI
+    df_empresas = _sanitiza_df(df_empresas)
     total_empresas = df_empresas.shape[0]
-    
+
+    # ── paleta de cores por regime ────────────────────────────────────────────
+    _CORES_REGIME = [
+        "#1d3f77", "#27ae60", "#e67e22", "#8e44ad",
+        "#c0392b", "#2471a3", "#148f77", "#d35400",
+        "#7f8c8d", "#b7950b",
+    ]
+
     st.subheader("Empresas - Apenas ATIVAS")
     st.markdown(f"<p style='text-align:right; font-size:20px;'><b>Total:</b> {total_empresas} | <b>Competência:</b> {competencia}</p>", unsafe_allow_html=True)
-    
+
+    if "Regime" in df_empresas.columns:
+        regime_serie = df_empresas["Regime"].replace({"nan": "", "None": ""}).fillna("")
+        regime_serie = regime_serie.apply(lambda v: "Em Branco" if str(v).strip() == "" else str(v).strip())
+        contagem_regime = regime_serie.value_counts().to_dict()
+
+        badges = ""
+        for i, (regime, qtd) in enumerate(sorted(contagem_regime.items())):
+            cor = _CORES_REGIME[i % len(_CORES_REGIME)]
+            badges += (
+                f"<span style='display:inline-block; margin:3px 6px 3px 0; padding:5px 14px; "
+                f"background:{cor}; color:#fff; border-radius:20px; font-size:13px; font-weight:600;'>"
+                f"{regime}: {qtd}</span>"
+            )
+        st.markdown(f"<div style='margin-bottom:10px;'>{badges}</div>", unsafe_allow_html=True)
+
     with st.container():
         df_empresas = _sanitiza_df(df_empresas)
         exibe_aggrid(df_empresas, height=400, grid_key="grid_empresas")
@@ -1400,56 +1460,178 @@ def pagina_reinf():
     )
 
 
+@st.dialog("DCTF WEB — Sem Procuração")
+def _modal_dctf_sem_procuracao(df_show):
+    st.markdown(f"**{df_show.shape[0]} empresa(s) sem procuração**")
+    cols = [c for c in ["Código", "Razão Social", "CNPJ", "Regime",
+                        "SITUAÇÃO DCTF", "MATRIZ / FILIAL"]
+            if c in df_show.columns]
+    df_exib = df_show[cols].copy()
+    if "CNPJ" in df_exib.columns:
+        df_exib["CNPJ"] = df_exib["CNPJ"].apply(_normaliza_cnpj)
+    st.dataframe(df_exib.reset_index(drop=True),
+                 use_container_width=True, hide_index=True)
+
+
+@st.dialog("DCTF WEB — Não Concluídas")
+def _modal_dctf_nao_concluidas(df_show):
+    st.markdown(f"**{df_show.shape[0]} empresa(s) não concluída(s)**")
+    cols = [c for c in ["Código", "Razão Social", "CNPJ", "Regime",
+                        "SITUAÇÃO DCTF", "MATRIZ / FILIAL"]
+            if c in df_show.columns]
+    df_exib = df_show[cols].copy()
+    if "CNPJ" in df_exib.columns:
+        df_exib["CNPJ"] = df_exib["CNPJ"].apply(_normaliza_cnpj)
+    st.dataframe(df_exib.reset_index(drop=True),
+                 use_container_width=True, hide_index=True)
+
+
+@st.fragment
 def pagina_dctf_web():
+    import plotly.graph_objects as go
     st.empty()
+
     df = le_planilha_google(GOOGLE_SHEET_URL, SHEET_EMPRESAS)
     if df is None or df.empty:
         st.warning("Nenhum dado encontrado.")
         return
-    
+
     df = df.fillna("")
     df = df[df["Situação"].astype(str).str.upper() == "ATIVA"]
     if df.empty:
         st.warning("Nenhuma empresa ATIVA encontrada.")
         return
-    
-    competencia = ""
-    if "PERÍODO DE COMPETÊNCIA" in df.columns:
-        try:
-            competencia_dt = pd.to_datetime(df["PERÍODO DE COMPETÊNCIA"].iloc[0], errors="coerce")
-            if not pd.isna(competencia_dt):
-                competencia = competencia_dt.strftime("%m/%Y")
-        except:
-            pass
-    
-    if "PERÍODO" in df.columns:
-        df["PERÍODO"] = pd.to_datetime(df["PERÍODO"], errors="coerce").dt.strftime("%m-%Y").fillna("")
-    
-    df_dctf = df[["Código", "Razão Social", "CNPJ", "Regime", "PERÍODO", "ORIGEM", "TIPO", 
-                  "SITUAÇÃO DCTF", "MATRIZ / FILIAL", "Situação"]].copy()
-    
-    concluidas = df_dctf[df_dctf["SITUAÇÃO DCTF"].astype(str).str.upper() == "ATIVA"].shape[0]
-    sem_procuracao = df_dctf[df_dctf["SITUAÇÃO DCTF"].astype(str).str.upper() == "SEM PROCURAÇÃO"].shape[0]
-    filiais = df_dctf[df_dctf["MATRIZ / FILIAL"].astype(str).str.upper() == "FILIAL"].shape[0]
-    nao_concluidas_total = df_dctf[~df_dctf["SITUAÇÃO DCTF"].astype(str).str.upper().isin(["ATIVA", "SEM PROCURAÇÃO"])].shape[0]
-    nao_concluidas = max(0, nao_concluidas_total - filiais)
-    
-    st.markdown(f"<h2>DCTF WEB</h2><p style='text-align:right; font-size:20px;'>"
-                f"<b>Concluídas:</b> {concluidas} | <b>Sem Procuração:</b> {sem_procuracao} | "
-                f"<b>Filiais:</b> {filiais} | <b>Não concluídas:</b> {nao_concluidas} | "
-                f"<b>Competência:</b> {competencia}</p>", unsafe_allow_html=True)
-    
-    gb = GridOptionsBuilder.from_dataframe(df_dctf)
-    gb.configure_default_column(resizable=True, filter=True, sortable=True)
-    gb.configure_grid_options(domLayout="normal")
-    
-    AgGrid(df_dctf, gridOptions=gb.build(), update_mode=GridUpdateMode.NO_UPDATE,
-           fit_columns_on_grid_load=True, height=600)
-    
+
+    competencia_raw = df["PERÍODO DE COMPETÊNCIA"].iloc[0] \
+        if "PERÍODO DE COMPETÊNCIA" in df.columns else ""
+    _dt_comp = pd.to_datetime(competencia_raw, errors='coerce')
+    competencia = _dt_comp.strftime("%m/%Y") if not pd.isna(_dt_comp) else ""
+
+    # ── colunas para exibição ─────────────────────────────────────────────────
+    colunas = ["Código", "Razão Social", "CNPJ", "Regime", "PERÍODO", "ORIGEM",
+               "TIPO", "SITUAÇÃO DCTF", "MATRIZ / FILIAL", "Situação"]
+    df_dctf = df[[c for c in colunas if c in df.columns]].copy()
+
+    if "PERÍODO" in df_dctf.columns:
+        df_dctf["PERÍODO"] = pd.to_datetime(
+            df_dctf["PERÍODO"], errors="coerce"
+        ).dt.strftime("%m-%Y").fillna("")
+
+    if "CNPJ" in df_dctf.columns:
+        df_dctf["CNPJ"] = df_dctf["CNPJ"].apply(_normaliza_cnpj)
+
+    # ── classificação ─────────────────────────────────────────────────────────
+    def _classifica_dctf(val):
+        v = str(val).strip().upper()
+        if "CONCLUÍDA" in v or "CONCLUIDA" in v or v == "ATIVA":
+            return "Concluída"
+        if "PROCURA" in v:
+            return "Sem Procuração"
+        return "Não Concluída"
+
+    col_sit = "SITUAÇÃO DCTF"
+    df_dctf["_status"] = df_dctf[col_sit].apply(_classifica_dctf) \
+        if col_sit in df_dctf.columns else "Não Concluída"
+
+    if "MATRIZ / FILIAL" in df_dctf.columns:
+        mask_filial = df_dctf["MATRIZ / FILIAL"].astype(str).str.strip().str.upper() == "FILIAL"
+        df_dctf.loc[mask_filial, "_status"] = "Filial"
+
+    # ── contagens ─────────────────────────────────────────────────────────────
+    concluidas     = (df_dctf["_status"] == "Concluída").sum()
+    sem_procuracao = (df_dctf["_status"] == "Sem Procuração").sum()
+    nao_concluidas = (df_dctf["_status"] == "Não Concluída").sum()
+    filiais        = (df_dctf["_status"] == "Filial").sum()
+    total          = concluidas + sem_procuracao + nao_concluidas
+
+    # ── donut ─────────────────────────────────────────────────────────────────
+    if "dctf_chart_key" not in st.session_state:
+        st.session_state["dctf_chart_key"] = 0
+
+    pct_c  = round(concluidas     / total * 100) if total else 0
+    pct_sp = round(sem_procuracao / total * 100) if total else 0
+    pct_nc = round(nao_concluidas / total * 100) if total else 0
+
+    fig = go.Figure(data=[go.Pie(
+        labels=["Concluídas", "Sem Procuração", "Não Concluídas"],
+        values=[int(concluidas), int(sem_procuracao), int(nao_concluidas)],
+        hole=0.68,
+        marker=dict(
+            colors=["#27ae60", "#e67e22", "#e74c3c"],
+            line=dict(color="#ffffff", width=3),
+        ),
+        textinfo="none",
+        hovertemplate="<b>%{label}</b><br>%{value} empresa(s) — %{percent}<extra></extra>",
+        direction="clockwise",
+        sort=False,
+    )])
+    fig.update_layout(
+        paper_bgcolor="white", plot_bgcolor="white",
+        showlegend=False,
+        margin=dict(t=20, b=20, l=20, r=20),
+        height=300,
+        annotations=[dict(
+            text=f"<b>{total}</b><br><span style='font-size:11px'>empresas</span>",
+            x=0.5, y=0.5,
+            xanchor="center", yanchor="middle",
+            showarrow=False,
+            font=dict(size=22, color="#1d3f77"),
+        )],
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        key=f"chart_dctf_{st.session_state['dctf_chart_key']}",
+    )
+
+    col_l, col_m, col_r = st.columns(3)
+    with col_l:
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#f0faf4; "
+            f"border-radius:8px; border-left:4px solid #27ae60;'>"
+            f"<span style='font-size:22px; font-weight:700; color:#27ae60;'>{concluidas}</span><br>"
+            f"<span style='font-size:13px; color:#555;'>Concluídas ({pct_c}%)</span></div>",
+            unsafe_allow_html=True,
+        )
+    with col_m:
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#fdf3e7; "
+            f"border-radius:8px; border-left:4px solid #e67e22;'>"
+            f"<span style='font-size:22px; font-weight:700; color:#e67e22;'>{sem_procuracao}</span><br>"
+            f"<span style='font-size:13px; color:#555;'>Sem Procuração ({pct_sp}%)</span></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Ver sem procuração", use_container_width=True,
+                     key="btn_dctf_sem_proc"):
+            df_sp = df_dctf[df_dctf["_status"] == "Sem Procuração"]
+            _modal_dctf_sem_procuracao(df_sp)
+    with col_r:
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#fdf2f2; "
+            f"border-radius:8px; border-left:4px solid #e74c3c;'>"
+            f"<span style='font-size:22px; font-weight:700; color:#e74c3c;'>{nao_concluidas}</span><br>"
+            f"<span style='font-size:13px; color:#555;'>Não Concluídas ({pct_nc}%)</span></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Ver não concluídas", use_container_width=True,
+                     key="btn_dctf_nao_conc"):
+            df_nc = df_dctf[df_dctf["_status"] == "Não Concluída"]
+            _modal_dctf_nao_concluidas(df_nc)
+
+    st.divider()
+
+    # ── tabela principal ──────────────────────────────────────────────────────
+    df_dctf = _sanitiza_df(df_dctf.drop(columns=["_status"]))
+    exibe_aggrid(df_dctf, height=400, grid_key="grid_dctf")
+
     output = BytesIO()
     df_dctf.to_excel(output, index=False)
-    st.download_button("Baixar Excel", data=output.getvalue(), file_name="dctf_web.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.download_button(
+        "Baixar Excel", data=output.getvalue(),
+        file_name="dctf_web.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @st.dialog("DMS — Sem Acesso")
@@ -1710,16 +1892,6 @@ def _modal_rest_sem_acesso(df_show):
                  use_container_width=True, hide_index=True)
 
 
-@st.dialog("SERVIÇOS TOMADOS — Sem REST Prefeitura")
-def _modal_rest_sem_prefeitura(df_show):
-    st.markdown(f"**{df_show.shape[0]} empresa(s) sem REST Prefeitura**")
-    cols = [c for c in ["Código", "Razão Social", "CNPJ", "Município", "Estado", "REST"]
-            if c in df_show.columns]
-    df_exib = df_show[cols].copy()
-    if "CNPJ" in df_exib.columns:
-        df_exib["CNPJ"] = df_exib["CNPJ"].apply(_normaliza_cnpj)
-    st.dataframe(df_exib.reset_index(drop=True),
-                 use_container_width=True, hide_index=True)
 
 
 @st.dialog("GUIA ISS REST — Com Imposto")
@@ -1774,9 +1946,7 @@ def pagina_rest():
             if pd.notna(val) and str(val).strip() not in ("", "NAN") else ""
         if "SEM ACESSO" in v:
             return "Sem Acesso"
-        if "SEM REST PREFEITURA" in v:
-            return "Sem REST Prefeitura"
-        return "Concluída"   # "Concluída" ou em branco
+        return "Concluída"
 
     if "REST" in df_rest.columns:
         df_rest["REST"] = df_rest["REST"].apply(_classifica_rest)
@@ -1799,8 +1969,7 @@ def pagina_rest():
     # ── contagens REST ────────────────────────────────────────────────────────
     concluidas       = (df_rest["REST"] == "Concluída").sum()
     sem_acesso       = (df_rest["REST"] == "Sem Acesso").sum()
-    sem_prefeitura   = (df_rest["REST"] == "Sem REST Prefeitura").sum()
-    total_rest       = concluidas + sem_acesso + sem_prefeitura
+    total_rest       = concluidas + sem_acesso
 
     # ── contagens GUIA ISS ────────────────────────────────────────────────────
     com_imposto  = (df_rest["GUIA ISS REST"] == "Com Imposto").sum()
@@ -1812,7 +1981,6 @@ def pagina_rest():
         f"<p style='text-align:right; font-size:20px;'>"
         f"<b>Concluídas:</b> {concluidas} &nbsp;|&nbsp; "
         f"<b>Sem Acesso:</b> {sem_acesso} &nbsp;|&nbsp; "
-        f"<b>Sem REST Prefeitura:</b> {sem_prefeitura} &nbsp;|&nbsp; "
         f"<b>Com Imposto:</b> {com_imposto} &nbsp;|&nbsp; "
         f"<b>Sem Imposto:</b> {sem_imposto} &nbsp;|&nbsp; "
         f"<b>Competência:</b> {competencia}</p>",
@@ -1825,11 +1993,10 @@ def pagina_rest():
     if "guia_rest_chart_key" not in st.session_state:
         st.session_state["guia_rest_chart_key"] = 0
 
-    pct_c   = round(concluidas     / total_rest  * 100) if total_rest  else 0
-    pct_sa  = round(sem_acesso     / total_rest  * 100) if total_rest  else 0
-    pct_sp  = round(sem_prefeitura / total_rest  * 100) if total_rest  else 0
-    pct_ci  = round(com_imposto    / total_guia  * 100) if total_guia  else 0
-    pct_si  = round(sem_imposto    / total_guia  * 100) if total_guia  else 0
+    pct_c   = round(concluidas  / total_rest * 100) if total_rest else 0
+    pct_sa  = round(sem_acesso  / total_rest * 100) if total_rest else 0
+    pct_ci  = round(com_imposto / total_guia * 100) if total_guia else 0
+    pct_si  = round(sem_imposto / total_guia * 100) if total_guia else 0
 
     # ── dois donuts lado a lado ───────────────────────────────────────────────
     col_d1, col_d2 = st.columns(2)
@@ -1840,11 +2007,11 @@ def pagina_rest():
                     unsafe_allow_html=True)
 
         fig1 = go.Figure(data=[go.Pie(
-            labels=["Concluídas", "Sem Acesso", "Sem REST Prefeitura"],
-            values=[int(concluidas), int(sem_acesso), int(sem_prefeitura)],
+            labels=["Concluídas", "Sem Acesso"],
+            values=[int(concluidas), int(sem_acesso)],
             hole=0.68,
             marker=dict(
-                colors=["#d35400", "#7f8c8d", "#f0b429"],
+                colors=["#d35400", "#7f8c8d"],
                 line=dict(color="#ffffff", width=3),
             ),
             textinfo="none",
@@ -1868,7 +2035,7 @@ def pagina_rest():
         st.plotly_chart(fig1, use_container_width=True,
                         key=f"chart_rest_{st.session_state['rest_chart_key']}")
 
-        cl1, cl2, cl3 = st.columns(3)
+        cl1, cl2 = st.columns(2)
         with cl1:
             st.markdown(
                 f"<div style='text-align:center; padding:8px; background:#fdf0e8; "
@@ -1885,25 +2052,11 @@ def pagina_rest():
                 f"<span style='font-size:11px; color:#555;'>Sem Acesso ({pct_sa}%)</span></div>",
                 unsafe_allow_html=True,
             )
-        with cl3:
-            st.markdown(
-                f"<div style='text-align:center; padding:8px; background:#fefae8; "
-                f"border-radius:8px; border-left:4px solid #f0b429;'>"
-                f"<span style='font-size:18px; font-weight:700; color:#c79a00;'>{sem_prefeitura}</span><br>"
-                f"<span style='font-size:11px; color:#555;'>Sem Pref. ({pct_sp}%)</span></div>",
-                unsafe_allow_html=True,
-            )
 
         st.markdown("<br>", unsafe_allow_html=True)
-        cb1, cb2 = st.columns(2)
-        with cb1:
-            if st.button("Ver sem acesso", use_container_width=True,
-                         key="btn_rest_sem_acesso"):
-                _modal_rest_sem_acesso(df_rest[df_rest["REST"] == "Sem Acesso"])
-        with cb2:
-            if st.button("Ver sem REST Prefeitura", use_container_width=True,
-                         key="btn_rest_sem_prefeitura"):
-                _modal_rest_sem_prefeitura(df_rest[df_rest["REST"] == "Sem REST Prefeitura"])
+        if st.button("Ver sem acesso", use_container_width=True,
+                     key="btn_rest_sem_acesso"):
+            _modal_rest_sem_acesso(df_rest[df_rest["REST"] == "Sem Acesso"])
 
     # ── donut 2: GUIA ISS REST ────────────────────────────────────────────────
     with col_d2:
@@ -2225,133 +2378,182 @@ def pagina_sefaz():
 
 
 def pagina_cnd_municipal():
+    import plotly.graph_objects as go
     st.empty()
+
     df = le_planilha_google(GOOGLE_SHEET_URL, SHEET_EMPRESAS)
     if df is None:
         return
-    
-    competencia_raw = df.get("PERÍODO DE COMPETÊNCIA", [""])[0]
-    competencia = pd.to_datetime(competencia_raw, errors='coerce').strftime("%m/%Y") if competencia_raw else ""
-    
-    df_cnd = df[df["Situação"].astype(str).str.upper() == "ATIVA"] if "Situação" in df.columns else pd.DataFrame()
+
+    competencia_raw = df["PERÍODO DE COMPETÊNCIA"].iloc[0] \
+        if "PERÍODO DE COMPETÊNCIA" in df.columns else ""
+    competencia = pd.to_datetime(competencia_raw, errors="coerce").strftime("%m/%Y") \
+        if competencia_raw else ""
+
+    df_cnd = df[df["Situação"].astype(str).str.upper() == "ATIVA"].copy() \
+        if "Situação" in df.columns else pd.DataFrame()
     if df_cnd.empty:
         st.warning("Nenhuma empresa ATIVA encontrada.")
         return
-    
-    colunas_solicitadas = ["Código", "Razão Social", "CNPJ", "Município", "Estado", 
+
+    colunas_solicitadas = ["Código", "Razão Social", "CNPJ", "Município", "Estado",
                            "SITUAÇÃO CND MUNICIPAL", "VALIDADE", "LINK CND MUNICIPAL", "Situação"]
-    colunas_existentes = [c for c in colunas_solicitadas if c in df_cnd.columns]
-    df_cnd = df_cnd[colunas_existentes].copy()
-    
+    df_cnd = df_cnd[[c for c in colunas_solicitadas if c in df_cnd.columns]].copy()
+
     if "VALIDADE" in df_cnd.columns:
-        df_cnd["VALIDADE"] = pd.to_datetime(df_cnd["VALIDADE"], errors='coerce').dt.strftime("%d/%m/%Y").fillna("")
-    
-    def check_pdf_link(link):
-        return "Disponível" if pd.notna(link) and str(link).strip() != "" else "Indisponível"
-    
-    if "LINK CND MUNICIPAL" in df_cnd.columns:
-        df_cnd["PDF"] = df_cnd["LINK CND MUNICIPAL"].apply(check_pdf_link)
-    else:
-        df_cnd["PDF"] = "Indisponível"
-    
+        df_cnd["VALIDADE"] = pd.to_datetime(df_cnd["VALIDADE"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
+
+    if "CNPJ" in df_cnd.columns:
+        df_cnd["CNPJ"] = df_cnd["CNPJ"].apply(_normaliza_cnpj)
+
+    # ── Contagens ─────────────────────────────────────────────────────────────
     if "SITUAÇÃO CND MUNICIPAL" in df_cnd.columns:
-        situacao_upper = df_cnd["SITUAÇÃO CND MUNICIPAL"].astype(str).str.upper().str.strip()
-        positivas = (situacao_upper == "POSITIVA").sum()
-        negativas = (situacao_upper == "NEGATIVA").sum()
-        positiva_efeito_negativa = (situacao_upper == "POSITIVA COM EFEITO NEGATIVA").sum()
-    if "SITUAÇÃO CND MUNICIPAL" in df_cnd.columns:
-        situacao_upper = df_cnd["SITUAÇÃO CND MUNICIPAL"].astype(str).str.upper().str.strip()
-        positivas = (situacao_upper == "POSITIVA").sum()
-        negativas = (situacao_upper == "NEGATIVA").sum()
-        positiva_efeito_negativa = (situacao_upper == "POSITIVA COM EFEITO NEGATIVA").sum()
-        nao_geradas = ((situacao_upper == "") | (situacao_upper == "NAN") | df_cnd["SITUAÇÃO CND MUNICIPAL"].isna()).sum()
+        sit_u = df_cnd["SITUAÇÃO CND MUNICIPAL"].fillna("").astype(str).str.strip().str.upper()
+        positivas           = (sit_u == "POSITIVA").sum()
+        negativas           = (sit_u == "NEGATIVA").sum()
+        positiva_efeito_neg = (sit_u == "POSITIVA COM EFEITO NEGATIVA").sum()
+        nao_geradas         = sit_u.isin(["", "NAN"]).sum()
     else:
-        positivas = negativas = positiva_efeito_negativa = nao_geradas = 0
-    
+        positivas = negativas = positiva_efeito_neg = nao_geradas = 0
+
     total_geral = df_cnd.shape[0]
-    
+
+    # ── Cabeçalho ─────────────────────────────────────────────────────────────
+    st.markdown("<h2>CND MUNICIPAL</h2>", unsafe_allow_html=True)
+    st.markdown(
+        f"<p style='text-align:right; font-size:20px;'>"
+        f"<b>Total:</b> {total_geral} &nbsp;|&nbsp; <b>Competência:</b> {competencia}</p>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Donut ─────────────────────────────────────────────────────────────────
+    total_dash = int(positivas + negativas + positiva_efeito_neg + nao_geradas)
+    if total_dash > 0:
+        fig = go.Figure(data=[go.Pie(
+            labels=["Positivas", "Negativas", "Positiva c/ Efeito Neg.", "Não Geradas"],
+            values=[int(positivas), int(negativas), int(positiva_efeito_neg), int(nao_geradas)],
+            hole=0.68,
+            marker=dict(colors=["#e74c3c", "#27ae60", "#f39c12", "#bdc3c7"],
+                        line=dict(color="#ffffff", width=3)),
+            textinfo="none",
+            hovertemplate="<b>%{label}</b><br>%{value} empresa(s) — %{percent}<extra></extra>",
+            direction="clockwise", sort=False,
+        )])
+        fig.update_layout(
+            paper_bgcolor="white", plot_bgcolor="white", showlegend=False,
+            margin=dict(t=20, b=20, l=20, r=20), height=300,
+            annotations=[dict(
+                text=f"<b>{total_geral}</b><br><span style='font-size:11px'>empresas</span>",
+                x=0.5, y=0.5, xanchor="center", yanchor="middle",
+                showarrow=False, font=dict(size=22, color="#1d3f77"),
+            )],
+        )
+        st.plotly_chart(fig, use_container_width=True, key="chart_cnd_municipal_donut")
+
+    # ── Cards ─────────────────────────────────────────────────────────────────
+    c1, c2, c3, c4 = st.columns(4)
+
+    _cols_modal = ["Código", "Razão Social", "CNPJ", "Município", "SITUAÇÃO CND MUNICIPAL", "VALIDADE"]
+
+    with c1:
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#fdf2f2; border-radius:8px; border-left:4px solid #e74c3c;'>"
+            f"<span style='font-size:22px; font-weight:700; color:#e74c3c;'>{positivas}</span><br>"
+            f"<span style='font-size:13px; color:#555;'>Positivas</span></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Ver Positivas", key="btn_cnd_pos", use_container_width=True):
+            df_pos = df_cnd[df_cnd["SITUAÇÃO CND MUNICIPAL"].fillna("").astype(str).str.strip().str.upper() == "POSITIVA"]
+            _modal_dashboard("Positivas", df_pos, _cols_modal)
+
+    with c2:
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#eafaf1; border-radius:8px; border-left:4px solid #27ae60;'>"
+            f"<span style='font-size:22px; font-weight:700; color:#27ae60;'>{negativas}</span><br>"
+            f"<span style='font-size:13px; color:#555;'>Negativas</span></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Ver Negativas", key="btn_cnd_neg", use_container_width=True):
+            df_neg = df_cnd[df_cnd["SITUAÇÃO CND MUNICIPAL"].fillna("").astype(str).str.strip().str.upper() == "NEGATIVA"]
+            _modal_dashboard("Negativas", df_neg, _cols_modal)
+
+    with c3:
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#fef9e7; border-radius:8px; border-left:4px solid #f39c12;'>"
+            f"<span style='font-size:22px; font-weight:700; color:#f39c12;'>{positiva_efeito_neg}</span><br>"
+            f"<span style='font-size:13px; color:#555;'>Positiva c/ Efeito Neg.</span></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Ver Positiva c/ Efeito Neg.", key="btn_cnd_pen", use_container_width=True):
+            df_pen = df_cnd[df_cnd["SITUAÇÃO CND MUNICIPAL"].fillna("").astype(str).str.strip().str.upper() == "POSITIVA COM EFEITO NEGATIVA"]
+            _modal_dashboard("Positiva c/ Efeito Negativa", df_pen, _cols_modal)
+
+    with c4:
+        st.markdown(
+            f"<div style='text-align:center; padding:8px; background:#f8f9fa; border-radius:8px; border-left:4px solid #bdc3c7;'>"
+            f"<span style='font-size:22px; font-weight:700; color:#7f8c8d;'>{nao_geradas}</span><br>"
+            f"<span style='font-size:13px; color:#555;'>Não Geradas</span></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Ver Não Geradas", key="btn_cnd_ng", use_container_width=True):
+            sit_u2 = df_cnd["SITUAÇÃO CND MUNICIPAL"].fillna("").astype(str).str.strip().str.upper()
+            df_ng = df_cnd[sit_u2.isin(["", "NAN"])]
+            _modal_dashboard("Não Geradas", df_ng, ["Código", "Razão Social", "CNPJ", "Município"])
+
+    st.divider()
+
+    # ── Visualizador de PDF / grade ───────────────────────────────────────────
     if "visualizando_pdf" not in st.session_state:
         st.session_state.visualizando_pdf = False
         st.session_state.pdf_selecionado = None
-    
+
     if st.session_state.visualizando_pdf and st.session_state.pdf_selecionado:
         col1, col2 = st.columns([6, 1])
-        
         with col1:
             if st.button("← Voltar para a lista", type="primary"):
                 st.session_state.visualizando_pdf = False
                 st.session_state.pdf_selecionado = None
                 st.rerun()
-        
         with col2:
             row = st.session_state.pdf_selecionado
             link_pdf = row.get("LINK CND MUNICIPAL", "")
-            
-            if link_pdf and "drive.google.com" in str(link_pdf):
-                if "/file/d/" in link_pdf:
-                    file_id = link_pdf.split("/file/d/")[1].split("/")[0]
-                    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-                    
-                    st.markdown(
-                        f'<a href="{download_url}" target="_blank">'
-                        f'<button style="background-color:#1d3f77; color:white; padding:8px 16px; '
-                        f'border:none; border-radius:4px; cursor:pointer; font-size:14px;">'
-                        f'📥 Baixar PDF</button></a>',
-                        unsafe_allow_html=True
-                    )
-        
+            if link_pdf and "drive.google.com" in str(link_pdf) and "/file/d/" in str(link_pdf):
+                file_id = link_pdf.split("/file/d/")[1].split("/")[0]
+                st.markdown(
+                    f'<a href="https://drive.google.com/uc?export=download&id={file_id}" target="_blank">'
+                    f'<button style="background-color:#1d3f77;color:white;padding:8px 16px;'
+                    f'border:none;border-radius:4px;cursor:pointer;font-size:14px;">📥 Baixar PDF</button></a>',
+                    unsafe_allow_html=True,
+                )
         st.divider()
         row = st.session_state.pdf_selecionado
-        cnpj = row.get("CNPJ", "")
-        razao = row.get("Razão Social", "")
         link_pdf = row.get("LINK CND MUNICIPAL", "")
-        status_pdf = row.get("PDF", "Indisponível")
-        
-        st.subheader(f"📄 {razao}")
-        st.caption(f"CNPJ: {cnpj}")
-        
-        if status_pdf == "Disponível" and link_pdf:
+        st.subheader(f"📄 {row.get('Razão Social', '')}")
+        st.caption(f"CNPJ: {row.get('CNPJ', '')}")
+        if link_pdf and str(link_pdf).strip():
             try:
-                if "drive.google.com" in str(link_pdf):
-                    if "/file/d/" in link_pdf:
-                        file_id = link_pdf.split("/file/d/")[1].split("/")[0]
-                        embed_url = f"https://drive.google.com/file/d/{file_id}/preview"
-                        st.markdown(f'<iframe src="{embed_url}" width="100%" height="800" frameborder="0"></iframe>',
-                                    unsafe_allow_html=True)
-                    else:
-                        st.error("❌ Formato de link do Google Drive não reconhecido")
-                        st.info(f"Link: {link_pdf}")
+                if "drive.google.com" in str(link_pdf) and "/file/d/" in str(link_pdf):
+                    file_id = link_pdf.split("/file/d/")[1].split("/")[0]
+                    embed_url = f"https://drive.google.com/file/d/{file_id}/preview"
+                    st.markdown(f'<iframe src="{embed_url}" width="100%" height="800" frameborder="0"></iframe>',
+                                unsafe_allow_html=True)
                 else:
                     st.markdown(f'<iframe src="{link_pdf}" width="100%" height="800" frameborder="0"></iframe>',
                                 unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"❌ Erro ao carregar PDF: {e}")
-                st.info(f"Link: {link_pdf}")
         else:
             st.error("❌ PDF não disponível")
             st.info("Link do PDF não foi encontrado na planilha (coluna LINK CND MUNICIPAL)")
     else:
-        st.markdown(f"<h2>CND Municipal</h2><p style='text-align:right; font-size:20px;'>"
-                    f"<b>Positivas:</b> {positivas} | <b>Negativas:</b> {negativas} | "
-                    f"<b>Positiva c/ efeito negativa:</b> {positiva_efeito_negativa} | "
-                    f"<b>Não geradas:</b> {nao_geradas} | <b>Total:</b> {total_geral} | "
-                    f"<b>Competência:</b> {competencia}</p>", unsafe_allow_html=True)
-        
         st.info("💡 Selecione uma linha na tabela para visualizar o PDF correspondente.")
-        
-        with st.container():
-            df_cnd = _sanitiza_df(df_cnd)
-            grid_response = exibe_aggrid_com_oculta(df_cnd, height=400, grid_key="grid_cnd_municipal",
-                                                     selection_mode='single',
-                                                     colunas_ocultas=["Situação", "LINK CND MUNICIPAL"])
-        
-        selected_rows = grid_response.get('selected_rows', [])
-        if selected_rows is not None and len(selected_rows) > 0:
-            row = selected_rows.iloc[0].to_dict() if isinstance(selected_rows, pd.DataFrame) else selected_rows[0]
-            st.session_state.pdf_selecionado = row
-            st.session_state.visualizando_pdf = True
-            st.rerun()
-        
+        df_grid = _sanitiza_df(df_cnd)
+        grid_response = exibe_aggrid_com_oculta(
+            df_grid, height=400, grid_key="grid_cnd_municipal",
+            selection_mode="none",
+            colunas_ocultas=["Situação", "LINK CND MUNICIPAL"],
+        )
+
         output = BytesIO()
         df_cnd.to_excel(output, index=False)
         st.download_button("📥 Baixar Excel", data=output.getvalue(), file_name="cnd_municipal.xlsx",
@@ -2595,10 +2797,12 @@ COLUNAS_XML = [
     "PIS", "COFINS", "CSLL", "IRRF", "INSS", "ISS Retido",
     "Federais Retidos", "Tipo Retenção Federal",
     "CNAE", "Código LC", "Descrição LC", "Observações",
+    "IBS", "CBS",
 ]
 
-COFINS_LABEL = "*COFINS"  # ← AQUI
-COLS_IMPOSTO = ["PIS",  COFINS_LABEL, "CSLL", "IRRF", "INSS", "ISS Retido"]
+COFINS_LABEL = "*COFINS"
+IBS_LABEL    = "*IBS"
+COLS_IMPOSTO = ["PIS", COFINS_LABEL, "CSLL", "IRRF", "INSS", "ISS Retido", IBS_LABEL, "CBS"]
 COLS_CODIGO  = ["CNAE", "Código LC", "Descrição LC"]
 
 
@@ -2684,9 +2888,11 @@ def _carrega_xml(sheet_name, col_cnpj_filtro):
 
     df = df.copy()
 
-    # ── renomeia COFINS para evitar tradução do Chrome ────────────────────────
+    # ── renomeia COFINS e IBS para evitar tradução do Chrome ─────────────────
     if "COFINS" in df.columns:
         df = df.rename(columns={"COFINS": COFINS_LABEL})
+    if "IBS" in df.columns:
+        df = df.rename(columns={"IBS": IBS_LABEL})
 
     # ── Código LC ─────────────────────────────────────────────────────────────
     if "Código LC" in df.columns:
@@ -2714,7 +2920,7 @@ def _carrega_xml(sheet_name, col_cnpj_filtro):
     COLS_MONETARIAS = [
         "Valor Serviço", "Base de Cálculo", "Valor ISS",
         "PIS", COFINS_LABEL, "CSLL", "IRRF", "INSS",
-        "Federais Retidos",
+        "Federais Retidos", IBS_LABEL, "CBS",
     ]
     for col in COLS_MONETARIAS:
         if col in df.columns:
@@ -2849,12 +3055,13 @@ def _filtros_xml(df, col_cnpj, mapa_razao, formata_cnpj=True, page_id="rest"):
 
 COLS_TOTALIZADOR = [
     "Valor Serviço", "Base de Cálculo", "Valor ISS",
-    "PIS",  COFINS_LABEL, "CSLL", "IRRF", "INSS",
+    "PIS", COFINS_LABEL, "CSLL", "IRRF", "INSS", IBS_LABEL, "CBS",
 ]
 
 CORES_TOTAL = [
     "#1d3f77", "#2471a3", "#148f77",
     "#1e8449", "#b7950b", "#784212", "#922b21", "#6c3483",
+    "#117a65", "#1a5276",
 ]
 
 def _exibe_totalizador(df):
@@ -3479,4 +3686,4 @@ with st.session_state.main_container.container():
     elif pagina == "ENDEREÇO DE EMAIL":
         pagina_emails_cnpj()
     elif pagina == "MENSAGENS DE EMAIL":
-        pagina_mensagens_email()    
+        pagina_mensagens_email()
