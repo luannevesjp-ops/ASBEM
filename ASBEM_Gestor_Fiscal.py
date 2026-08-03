@@ -12,6 +12,9 @@ import time
 import os
 import base64
 import json
+import subprocess
+import sys
+import socket
 from pathlib import Path
 from datetime import date
 
@@ -44,6 +47,56 @@ SHEET_EMAIL_ABA  = "EMAIL"
 SHEET_MSG_ABA    = "MENSAGEM"
 
 CERT_DATA_FILE = Path(os.path.abspath(__file__)).parent / "cert_data.json"
+
+# Endereço do sistema "ASBEM_Exectar_Sistemas.py" (roda como um segundo app Streamlit).
+# EXECUTAR_SISTEMAS_HOST é só o endereço mostrado no link do navegador - em teste
+# local "localhost", no servidor do cliente trocar pelo IP/host da rede. A checagem
+# de porta e o subprocess.Popen sempre usam "localhost" porque rodam na MESMA
+# máquina que este painel, não na máquina do usuário que está com o navegador aberto.
+EXECUTAR_SISTEMAS_PORT   = 8502
+EXECUTAR_SISTEMAS_HOST   = "localhost"
+EXECUTAR_SISTEMAS_URL    = f"http://{EXECUTAR_SISTEMAS_HOST}:{EXECUTAR_SISTEMAS_PORT}"
+EXECUTAR_SISTEMAS_SCRIPT = Path(os.path.abspath(__file__)).parent / "ASBEM_Exectar_Sistemas.py"
+
+
+def _executar_sistemas_no_ar(timeout=0.3):
+    """Testa se já existe um servidor Streamlit respondendo na porta do EXECUTAR SISTEMAS."""
+    try:
+        with socket.create_connection(("localhost", EXECUTAR_SISTEMAS_PORT), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _abrir_executar_sistemas():
+    """Garante que o app EXECUTAR SISTEMAS está rodando (sobe ele se preciso) e
+    então redireciona o navegador para lá. Sem isso o botão só funcionava quando
+    alguém já tinha aberto ASBEM_Exectar_Sistemas.py manualmente antes."""
+    if not _executar_sistemas_no_ar():
+        if not EXECUTAR_SISTEMAS_SCRIPT.exists():
+            st.error(f"Arquivo não encontrado: {EXECUTAR_SISTEMAS_SCRIPT}")
+            return
+        try:
+            subprocess.Popen(
+                [sys.executable, "-m", "streamlit", "run", str(EXECUTAR_SISTEMAS_SCRIPT),
+                 "--server.port", str(EXECUTAR_SISTEMAS_PORT), "--server.headless", "true"],
+                cwd=str(EXECUTAR_SISTEMAS_SCRIPT.parent),
+            )
+        except Exception as e:
+            st.error(f"Não foi possível iniciar o EXECUTAR SISTEMAS: {e}")
+            return
+
+        with st.spinner("Iniciando EXECUTAR SISTEMAS..."):
+            for _ in range(40):  # até ~20s pro servidor Streamlit subir
+                if _executar_sistemas_no_ar():
+                    break
+                time.sleep(0.5)
+            else:
+                st.error("O EXECUTAR SISTEMAS demorou demais para iniciar. Tente clicar novamente.")
+                return
+
+    st.markdown(f"<meta http-equiv='refresh' content='0; url={EXECUTAR_SISTEMAS_URL}'>",
+                unsafe_allow_html=True)
 
 # ============================================================================
 # CSS E ESTILOS
@@ -947,7 +1000,7 @@ def tela_menu_principal():
     st.markdown("<h1 style='text-align:center; color:#1d3f77;'>Selecione a Área</h1>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
         st.markdown('<div class="menu-btn">', unsafe_allow_html=True)
@@ -979,6 +1032,12 @@ def tela_menu_principal():
             st.session_state["menu_area"] = "CERTIFICADO DIGITAL"
             st.session_state["pagina_atual"] = "CERTIFICADOS"
             st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col5:
+        st.markdown('<div class="menu-btn">', unsafe_allow_html=True)
+        if st.button("🖥️ EXECUTAR SISTEMAS", use_container_width=True, key="btn_executar_sistemas"):
+            _abrir_executar_sistemas()
         st.markdown('</div>', unsafe_allow_html=True)
 
 if st.session_state["menu_area"] is None:
