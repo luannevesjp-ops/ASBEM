@@ -12,9 +12,6 @@ import time
 import os
 import base64
 import json
-import subprocess
-import sys
-import socket
 from pathlib import Path
 from datetime import date
 
@@ -48,53 +45,20 @@ SHEET_MSG_ABA    = "MENSAGEM"
 
 CERT_DATA_FILE = Path(os.path.abspath(__file__)).parent / "cert_data.json"
 
-# Endereço do sistema "ASBEM_Exectar_Sistemas.py" (roda como um segundo app Streamlit).
-# EXECUTAR_SISTEMAS_HOST é só o endereço mostrado no link do navegador - em teste
-# local "localhost", no servidor do cliente trocar pelo IP/host da rede. A checagem
-# de porta e o subprocess.Popen sempre usam "localhost" porque rodam na MESMA
-# máquina que este painel, não na máquina do usuário que está com o navegador aberto.
-EXECUTAR_SISTEMAS_PORT   = 8502
-EXECUTAR_SISTEMAS_HOST   = "localhost"
-EXECUTAR_SISTEMAS_URL    = f"http://{EXECUTAR_SISTEMAS_HOST}:{EXECUTAR_SISTEMAS_PORT}"
-EXECUTAR_SISTEMAS_SCRIPT = Path(os.path.abspath(__file__)).parent / "ASBEM_Exectar_Sistemas.py"
-
-
-def _executar_sistemas_no_ar(timeout=0.3):
-    """Testa se já existe um servidor Streamlit respondendo na porta do EXECUTAR SISTEMAS."""
-    try:
-        with socket.create_connection(("localhost", EXECUTAR_SISTEMAS_PORT), timeout=timeout):
-            return True
-    except OSError:
-        return False
+# Endereço do launcher "ASBEM_Exectar_Sistemas.py" — Streamlit próprio, autohospedado
+# NA MÁQUINA DO ESCRITÓRIO (IP fixo na rede local), NUNCA na nuvem: este painel
+# (ASBEM_Gestor_Fiscal.py) roda no Streamlit Community Cloud, sem acesso à pasta de
+# rede D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\EXECUSSÕES\ nem como iniciar processo em
+# máquina de fora — por isso o botão abaixo só REDIRECIONA (o navegador de quem
+# clicou é quem precisa estar na rede do escritório pra alcançar esse IP), não tenta
+# subir o launcher sozinho. Antes de usar, o launcher precisa estar rodando manualmente
+# nessa máquina (streamlit run ASBEM_Exectar_Sistemas.py --server.port 8502).
+EXECUTAR_SISTEMAS_HOST = "192.168.1.250"
+EXECUTAR_SISTEMAS_PORT = 8502
+EXECUTAR_SISTEMAS_URL  = f"http://{EXECUTAR_SISTEMAS_HOST}:{EXECUTAR_SISTEMAS_PORT}"
 
 
 def _abrir_executar_sistemas():
-    """Garante que o app EXECUTAR SISTEMAS está rodando (sobe ele se preciso) e
-    então redireciona o navegador para lá. Sem isso o botão só funcionava quando
-    alguém já tinha aberto ASBEM_Exectar_Sistemas.py manualmente antes."""
-    if not _executar_sistemas_no_ar():
-        if not EXECUTAR_SISTEMAS_SCRIPT.exists():
-            st.error(f"Arquivo não encontrado: {EXECUTAR_SISTEMAS_SCRIPT}")
-            return
-        try:
-            subprocess.Popen(
-                [sys.executable, "-m", "streamlit", "run", str(EXECUTAR_SISTEMAS_SCRIPT),
-                 "--server.port", str(EXECUTAR_SISTEMAS_PORT), "--server.headless", "true"],
-                cwd=str(EXECUTAR_SISTEMAS_SCRIPT.parent),
-            )
-        except Exception as e:
-            st.error(f"Não foi possível iniciar o EXECUTAR SISTEMAS: {e}")
-            return
-
-        with st.spinner("Iniciando EXECUTAR SISTEMAS..."):
-            for _ in range(40):  # até ~20s pro servidor Streamlit subir
-                if _executar_sistemas_no_ar():
-                    break
-                time.sleep(0.5)
-            else:
-                st.error("O EXECUTAR SISTEMAS demorou demais para iniciar. Tente clicar novamente.")
-                return
-
     st.markdown(f"<meta http-equiv='refresh' content='0; url={EXECUTAR_SISTEMAS_URL}'>",
                 unsafe_allow_html=True)
 
