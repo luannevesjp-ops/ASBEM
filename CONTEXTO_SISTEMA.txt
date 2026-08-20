@@ -1,0 +1,1258 @@
+============================================================================
+RESUMO DO SISTEMA - LUATECH / ASBEM (atualizado em 20/08/2026)
+============================================================================
+Leia este arquivo inteiro antes de mexer em qualquer parte deste sistema.
+
+------------------------------------------------------------------------
+1) VISÃO GERAL
+------------------------------------------------------------------------
+O Luannn (contador, dono da Luatech) presta automação para escritórios de
+contabilidade. O escritório "ASBEM" é o primeiro cliente. Existem 2 painéis
+Streamlit, mas eles NÃO rodam no mesmo lugar (mudou em 03/08/2026 - ver seção
+10 pra detalhe completo):
+
+- ASBEM_Gestor_Fiscal.py  -> painel de gestão fiscal completo (certificados,
+  simples nacional, DCTF, SEFAZ, REINF, EMPRESAS - editar/cadastrar/incluir
+  em lote, etc). Sistema mais antigo/maior. Publicado no GitHub e hospedado
+  no Streamlit Community Cloud (share.streamlit.io) - roda nos servidores do
+  próprio Streamlit, NÃO na máquina do usuário nem na rede do escritório.
+- ASBEM_Exectar_Sistemas.py -> "launcher", mais simples: só abre os sistemas
+  locais de automação (scripts Selenium/tkinter/Playwright que precisam de
+  Chrome e acesso à pasta de rede do escritório). De propósito NUNCA vai pro
+  GitHub - roda só localmente na máquina do escritório que tiver acesso à
+  pasta de rede, iniciado à parte (não pelo Streamlit Cloud). Não tem mais
+  menu EMPRESAS (movido pro Gestor Fiscal em 03/08/2026).
+
+Objetivo de longo prazo (do próprio usuário): estruturar tudo de um jeito
+replicável para outros escritórios de contabilidade no futuro, não só ASBEM.
+
+------------------------------------------------------------------------
+2) MAPA DE ARQUIVOS
+------------------------------------------------------------------------
+Pasta deste projeto (painéis Streamlit):
+  C:\Users\luann\OneDrive\Documentos\DESENVOLVIMENTO\PY\PROGRAMA\ASBEM\
+    - ASBEM_Gestor_Fiscal.py       (painel de gestão fiscal + tela EMPRESAS,
+                                     no GitHub/Streamlit Cloud)
+    - ASBEM_Exectar_Sistemas.py    (launcher só de SISTEMAS, local-only,
+                                     NUNCA commitado - ver seção 10)
+    - apps_script_empresas.gs      (código-fonte do Apps Script de EMPRESAS,
+                                     guardado aqui só como referência/backup -
+                                     o que roda de verdade está publicado no
+                                     Google Apps Script, colar aqui NÃO atualiza
+                                     o script publicado, precisa colar lá manualmente)
+    - CONTEXTO_SISTEMA.txt         (este arquivo)
+
+Sistemas locais de automação (executados via subprocess pelo launcher):
+  - Gerar CND (certidões municipais, dispara para 5 scripts por município):
+    C:\Users\luann\OneDrive\Documentos\DESENVOLVIMENTO\PY\SISTEMAS PARA LUATECH\CND MUNICIPAL\Gerar_CND.py
+    scripts por município em: ...\CND MUNICIPAL\MUNICÍPIOS GOIÁS\CND_*.py
+    (ex: CND_Betha.py - obs: CND_Anapolis.py é referenciado no dicionário de
+    municípios suportados mas NÃO existe mais nessa pasta - pendência aberta,
+    nunca resolvida, perguntar ao usuário se ainda usa Anápolis)
+
+  - SEFAZ (solicitar + baixar XML de ENTRADA/SAÍDA e canceladas):
+    C:\Users\luann\OneDrive\Documentos\DESENVOLVIMENTO\PY\SISTEMAS PARA LUATECH\SEFAZ\SEFAZ_Site.py
+    (ver seção 8 — sistema novo, 28/07/2026, une dois scripts que existiam
+    soltos em PY\LIVRE\)
+
+  - DMS Site (ISSNet - Goiânia/Aparecida de Goiânia, DMS):
+    C:\Users\luann\OneDrive\Documentos\DESENVOLVIMENTO\PY\SISTEMAS PARA LUATECH\PREFEITURA\DMS_Site.py
+
+  - REST Site (ISSNet - Goiânia/Aparecida de Goiânia, REST):
+    C:\Users\luann\OneDrive\Documentos\DESENVOLVIMENTO\PY\PREFEITURA\REST SITE\REST_Site.py
+    (repare: pasta "PREFEITURA" AQUI é diferente da pasta "PREFEITURA" dentro
+    de "SISTEMAS PARA LUATECH" onde fica o DMS - são caminhos irmãos, não a
+    mesma pasta, apesar do nome igual)
+
+    Pendência aberta, nunca resolvida: dentro de REST_Site.py existe uma única
+    constante URL_LOGIN (sempre a de Goiânia); quando o usuário escolhe
+    "Aparecida de Goiânia" no formulário, só a variável self.municipio muda,
+    a URL de login não troca. Pode ser bug real, nunca confirmado com o
+    usuário.
+
+------------------------------------------------------------------------
+3) PLANILHA GOOGLE COMPARTILHADA (fonte única de dados)
+------------------------------------------------------------------------
+SHEET_ID = 1uuNhoIYTbAECnlEw64eFSKD558WCcCXpIqcJAQsgSSM
+Lida sempre via export xlsx (somente leitura):
+  https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx
+
+Aba principal de empresas: "GERAL" (mais de 110 colunas!). É a espinha
+dorsal de VÁRIOS sistemas: CND, DMS, REST, SEFAZ, REINF, DCTF, Simples
+Nacional, etc. Qualquer escrita nessa aba tem que ser célula a célula,
+NUNCA um clearContents()/reescrita da aba inteira - risco real de destruir
+dado de outro sistema.
+
+Colunas-chave usadas pelos sistemas de automação:
+  Razão Social, CNPJ, Código, Situação (ATIVA/INATIVA/EMPRESA NOVA),
+  Regime (ver lista de valores abaixo), Insc. Estadual, Insc. Municipal,
+  Município, Estado, MATRIZ / FILIAL (atenção: é "MATRIZ / FILIAL" todo
+  maiúsculo na planilha real - o texto "Matriz / Filial" com essa
+  capitalização NÃO bate com a coluna de verdade, bug antigo pré-existente
+  e inofensivo que só faz a coluna sumir de uma tabela de exibição, nunca
+  foi corrigido por não estar no escopo pedido)
+
+Valores reais já vistos na coluna Regime (26/07/2026):
+  SIMPLES NACIONAL, LUCRO PRESUMIDO, LUCRO REAL, MEI, NÃO OPTANTE,
+  NÃO OPTANTE SN, PRESUMIDO (variação de LUCRO PRESUMIDO), EM ANÁLISE
+  -> por isso o campo Regime no formulário de edição é um selectbox com
+  opções fixas (REGIMES_PADRAO em ASBEM_Exectar_Sistemas.py), não texto
+  livre: outras telas (ex: pagina_simples no Gestor Fiscal) comparam esse
+  campo por string exata, um erro de digitação quebraria o filtro.
+
+Todos os robôs (CND/DMS/REST) e o Gestor Fiscal filtram só quem está com
+Situação = "ATIVA". Por isso "EMPRESA NOVA" foi reaproveitado dentro da
+própria coluna Situação (decisão do usuário) em vez de criar uma coluna
+STATUS nova: uma empresa recém-cadastrada fica automaticamente de fora de
+tudo até o usuário completar o cadastro e trocar para ATIVA manualmente.
+
+------------------------------------------------------------------------
+4) APPS SCRIPT (só jeito de ESCREVER na planilha a partir do Python)
+------------------------------------------------------------------------
+Existem DOIS Apps Script publicados, DE PROPÓSITO separados (projetos e
+URLs diferentes) para isolar risco - um bug em um não pode derrubar o
+outro:
+
+a) Apps Script do Gestor Fiscal (mais antigo, já existia antes desta sessão)
+   - Usado por ASBEM_Gestor_Fiscal.py (constante APPS_SCRIPT_URL, por volta
+     da linha 218 do arquivo)
+   - URL: https://script.google.com/macros/s/AKfycbwhVYNHqlrUOYsmnUMvvAbEy2KW5MZToo0jwsMNRdN3-69LhAgyKJ4ytR185SdWyNWB/exec
+   - Só grava nas abas CERTIFICADOS / EMAIL / MENSAGEM, e faz isso com
+     clearContents() + reescreve a aba inteira (seguro pra essas 3 abas
+     porque elas só existem pra isso e são geradas 100% pelo Python)
+
+b) Apps Script de EMPRESAS (criado nesta sessão, 26/07/2026)
+   - Usado por ASBEM_Exectar_Sistemas.py (constante APPS_SCRIPT_EMPRESAS_URL)
+   - URL: https://script.google.com/macros/s/AKfycby3bPtkhbLb4sXE3qfwU0rXLS4mze2PYpFaHvrdYJ9eGX7kJiKjJR-zvxCt2MCPXSG4/exec
+   - Código-fonte guardado em apps_script_empresas.gs nesta pasta (é só
+     cópia/backup - editar esse arquivo local NÃO muda o que está publicado,
+     precisa abrir script.google.com e colar lá manualmente + reimplantar)
+   - Grava só na aba GERAL, célula a célula:
+       - edição: localiza a linha pelo CNPJ (normalizado, cuidando zero à
+         esquerda) e faz setValue só nos campos enviados
+       - empresa nova: escreve na próxima linha livre (getLastRow()+1), só
+         nos campos informados, resto da linha fica em branco
+   - NUNCA dá clearContents, nunca mexe em linha/coluna que não foi
+     explicitamente endereçada
+
+Se um dia precisar mudar o comportamento de gravação de EMPRESAS: editar
+apps_script_empresas.gs aqui pra manter o histórico, colar no editor do
+Apps Script publicado, salvar, e em "Implantar > Gerenciar implantações >
+editar (lápis) > Nova versão > Implantar" pra manter a MESMA URL (senão
+quebra o APPS_SCRIPT_EMPRESAS_URL do Python).
+
+------------------------------------------------------------------------
+5) BUG DE CNPJ (já corrigido, mas é bom lembrar o motivo)
+------------------------------------------------------------------------
+A planilha guarda CNPJ como número (float), então perde zero à esquerda.
+Se limpar direto a string "4291528000118.0" tirando os não-dígitos, sobra
+"42915280001180" - um dígito fantasma vai pro FINAL em vez do zero faltar
+no INÍCIO, corrompendo o CNPJ. Padrão correto usado em todos os arquivos
+(ASBEM_Exectar_Sistemas.py, Gerar_CND.py, DMS_Site.py, REST_Site.py):
+
+    digitos = re.sub(r"\D", "", str(int(float(valor))))
+    digitos = digitos.zfill(14)
+
+Ou seja: primeiro int(float(...)) pra remover o ".0" sem bagunçar a ordem
+dos dígitos, DEPOIS completa com zeros à esquerda.
+
+------------------------------------------------------------------------
+6) DECISÕES IMPORTANTES DE PRODUTO (não óbvias pelo código)
+------------------------------------------------------------------------
+- ASBEM_Exectar_Sistemas.py (29/07/2026): como os painéis rodam
+  centralizados na rede (o processo lançado por subprocess.Popen roda na
+  MÁQUINA QUE HOSPEDA o Streamlit, não na do usuário que clicou), quem
+  clica de outro computador nunca vê o Chrome/tkinter/console daquele
+  processo. Por isso executar_sistema() agora captura stdout/stderr do
+  subprocess (Popen com stdout=PIPE, stderr=STDOUT, text=True, flag "-u"
+  pra não bufferizar) numa thread separada, e pagina_sistemas() mostra um
+  log ao vivo por sistema (st.session_state["execucoes"], expander com
+  status 🟢/✅/❌, auto-atualiza via time.sleep(2)+st.rerun() enquanto algo
+  estiver rodando). Decisão do usuário: o log só aparece na aba/sessão de
+  quem clicou (não é global pra todo mundo olhando o painel), e clicar de
+  novo num sistema já rodando é BLOQUEADO com aviso (não abre 2º processo
+  em paralelo do mesmo sistema).
+- Login automático (captcha Cloudflare Turnstile) em DMS_Site.py e
+  REST_Site.py foi TENTADO e ABANDONADO (várias abordagens: clique direto,
+  ActionChains, pyautogui com coordenadas). O Cloudflare passa a exigir
+  verificação manual depois de vários acessos automatizados seguidos da
+  mesma sessão/IP - não é uma coisa que dá pra resolver de forma confiável
+  só automatizando cliques. Decisão do usuário: tela pede só a DATA, o
+  próprio usuário loga manualmente (o robô mostra aviso e espera detectar
+  o login sozinho, timeout de 5 min).
+
+- Todas as janelas tkinter (seleção de empresas, aviso de login, resumo
+  final) usam um helper _trazer_para_frente() (topmost + lift + focus_force)
+  porque as janelas abriam minimizadas/atrás da janela principal.
+
+- CND/DMS/REST não editam mais um Excel local: baixam a lista de empresas
+  ATIVA direto da planilha GERAL a cada execução (função
+  baixar_empresas_ativas()), e qualquer "status" que o robô precisa marcar
+  (ex: sem acesso) vai pra um Excel local de observações separado
+  (DMS_Observacoes.xlsx / REST_Observacoes.xlsx), NÃO de volta pra planilha.
+
+------------------------------------------------------------------------
+7) PENDÊNCIAS ABERTAS (sinalizadas ao usuário, nunca resolvidas)
+------------------------------------------------------------------------
+- CND_Anapolis.py: referenciado em Gerar_CND.py mas não existe mais na
+  pasta real de municípios.
+- REST_Site.py: URL_LOGIN pode não trocar corretamente para Aparecida de
+  Goiânia (só self.municipio muda).
+- pyautogui em REST_Site.py usa locateOnScreen(confidence=0.8), que
+  depende de opencv-python (cv2) - não estava instalado no ambiente na
+  época; só importa se esse trecho específico rodar.
+- SEFAZ_Site.py (ver seção 8): usuário confirmou (29/07/2026) que a
+  abertura do navegador/login funcionou depois da reversão do diálogo de
+  certificado pra versão simples. O fluxo completo de download na hora
+  (protocolo por protocolo, até 1h de espera cada) ainda não foi validado
+  de ponta a ponta numa execução real longa - acompanhar a próxima vez que
+  rodar pra todas as empresas.
+
+------------------------------------------------------------------------
+8) SEFAZ_Site.py (solicitar + baixar XML - 28/07/2026)
+------------------------------------------------------------------------
+Une em um script só (SEFAZ_Site.py, dentro de SISTEMAS PARA LUATECH\SEFAZ\)
+dois scripts que existiam separados em PY\LIVRE\ e que só funcionavam em
+sequência manual:
+  - Solicitar_XML.py           (pedia o XML de ENTRADA/SAÍDA e guardava o
+                                 protocolo devolvido pelo SEFAZ)
+  - Baixar_xml_Solicitados.py  (procurava o protocolo no Histórico de
+                                 Downloads e baixava o ZIP)
+Esses dois arquivos continuam existindo em PY\LIVRE\ como referência/backup,
+mas NÃO são mais o caminho ativo - o SEFAZ_Site.py é quem roda de verdade,
+registrado no launcher (ASBEM_Exectar_Sistemas.py, dicionário SISTEMAS).
+
+Mudanças de padrão feitas na fusão (decisão do usuário/desta sessão):
+  - Empresas: antes vinha de um Excel mantido à mão (C:\SEFAZ\INSCRIÇÕES.xlsx,
+    aba RODAR, coluna A=código/B=Insc. Estadual). Isso NÃO é mais usado -
+    agora busca direto da planilha GERAL compartilhada (Situação=ATIVA +
+    Insc. Estadual preenchida), com a mesma tela de seleção de empresas dos
+    outros robôs (padrão do DMS_Site.py/REST_Site.py).
+  - "Protocolo" + quantidade de cada empresa não vão mais para um Excel fixo
+    em C:\SEFAZ - agora ficam só em memória durante a execução e são salvos
+    numa planilha auxiliar na pasta Downloads do usuário
+    (SEFAZ_Protocolos_AAAAMMDD_HHMMSS.xlsx), regravada no final também com o
+    status de baixado. Não mexe na planilha GERAL.
+  - Pastas de saída renomeadas pra um padrão único (singular, com acento):
+    C:\SEFAZ\PRINTS SEFAZ, XML ENTRADA, XML SAÍDA, CANCELADAS ENTRADA,
+    CANCELADAS SAÍDA - todas criadas automaticamente se não existirem.
+    ATENÇÃO: os nomes antigos eram diferentes (XML ENTRADAS/SAÍDAS,
+    CANCELADAS sem sufixo = na prática só as de SAÍDA, CANCELADAS ENTRADAS)
+    - dado de execuções antigas nessas pastas antigas NÃO é migrado nem
+      limpo automaticamente.
+  - Segue o mesmo padrão "perguntar uma vez e limpar" do DMS/REST
+    (limpar_saida_se_solicitado) pras 5 pastas acima.
+
+ATUALIZADO 29/07/2026 (decisão do usuário): o fluxo original de duas fases
+(pedir tudo, fechar o navegador, esperar 5 min, abrir de novo e só então
+baixar) foi trocado por baixar NA HORA, protocolo por protocolo, sem fechar
+o navegador entre pedir e baixar:
+  1. Pra cada empresa, pede XML de ENTRADA, captura o protocolo e — sem
+     fechar o navegador — fica no Histórico de Downloads checando a cada
+     3 min (INTERVALO_VERIFICACAO_PROTOCOLO) se apareceu o botão BAIXAR ou
+     a mensagem SEM RESULTADOS, baixando assim que ficar pronto. Repete
+     pros eventos/canceladas de ENTRADA e depois pra SAÍDA. Canceladas de
+     SAÍDA continuam sendo obtidas na hora por fetch() (sem protocolo),
+     como sempre foi.
+  2. Se um protocolo específico passar de 1h (ESPERA_MAX_POR_PROTOCOLO)
+     sem ficar pronto, desiste de esperar ali, segue pra próxima empresa e
+     deixa essa pendência pra depois.
+  3. Salva a planilha de protocolos em Downloads (com status de baixado).
+  4. FASE 2 (Baixar) — agora só é uma REDE DE SEGURANÇA: só roda se sobrar
+     alguma pendência do passo 2. Aí sim abre um navegador novo, entra no
+     Histórico e tenta de novo a cada 10 min, até um teto de 4h (mesmo
+     comportamento de antes, só que como caminho raro em vez de padrão).
+  Função principal desse mecanismo: aguardar_e_baixar_protocolo() +
+  reabrir_tela_historico() em SEFAZ_Site.py.
+
+Diálogo de certificado do Windows / abertura do navegador (revertido
+29/07/2026): uma sessão anterior tinha trocado o fechamento simples do
+diálogo (thread única: espera 5s, manda Tab×3+Enter — igual ao
+Solicitar_XML.py original) por um sistema bem mais elaborado (detecção de
+janela por título via pygetwindow, clique por cor de pixel, aviso sonoro
+pro humano, DPI-awareness via ctypes). O usuário pediu pra reverter — o
+sistema elaborado não estava abrindo o navegador direito. iniciar_navegador_
+e_sessao() em SEFAZ_Site.py voltou a usar exatamente a versão simples do
+original; pygetwindow e ctypes não são mais usados nesse arquivo.
+
+------------------------------------------------------------------------
+9) TROCA DO MOTOR SEFAZ: "SEFAZ" -> "SEFAZ AUTOMAÇÃO" (31/07/2026)
+------------------------------------------------------------------------
+O launcher (SISTEMAS em ASBEM_Exectar_Sistemas.py) parou de acionar
+C:\...\SISTEMAS PARA LUATECH\SEFAZ\SEFAZ_Site.py (script único, Playwright
+solto, seção 8 acima) e passou a acionar:
+  C:\...\SISTEMAS PARA LUATECH\SEFAZ AUTOMAÇÃO\SEFAZ_Site.py
+
+O motor "SEFAZ AUTOMAÇÃO" é um sistema novo e mais robusto (SQLite com
+máquina de estados, retomável, sem sleeps fixos — ver LEIA-ME.md daquela
+pasta: config.py, db.py, sessao.py, portal.py, worker.py, sondar.py, run.py,
+painel.py). Ele já existia com uso próprio (painel.py: cola lista de
+empresas à mão; run.py: linha de comando; credenciais só via .env em
+C:\SEFAZ\xml_go\.env) - nada disso foi alterado.
+
+O que foi ACRESCENTADO é só um novo ponto de entrada, SEFAZ_Site.py DENTRO
+da pasta "SEFAZ AUTOMAÇÃO" (mesmo nome do script antigo, pasta diferente -
+por isso a troca no launcher foi só o caminho), que adapta esse motor ao
+mesmo padrão que os outros 3 sistemas já usam dentro do launcher:
+  - Empresas vêm da planilha GERAL (mesma fonte de sempre), filtrando
+    Situação=ATIVA + Estado=GO + Insc. Estadual preenchida (o script antigo
+    da pasta SEFAZ\ não filtrava por Estado - falha corrigida aqui).
+  - Tela tkinter de seleção de empresas (Listbox com busca, igual ao padrão
+    DMS/REST/SEFAZ antigo), chave de seleção por Código (o motor indexa
+    empresa por código+IE, não por CNPJ).
+  - Uma ÚNICA tela tkinter pede Usuário, Senha e Competência (MM/AAAA) -
+    diferente do script antigo, que pedia Data Inicial/Data Final: o motor
+    novo trabalha por competência (mês), não por intervalo de datas.
+    Usuário/senha digitados sobrescrevem config.USUARIO/config.SENHA a cada
+    execução (config.py é importado só DEPOIS das telas, de propósito).
+  - Depois de escolhido, desativa todas as empresas do banco, ativa só as
+    selecionadas (mesmo padrão do botão "Rodar" do painel.py), cria as
+    tarefas da competência e chama worker.executar() direto - sem subprocess
+    aninhado, pra o log aparecer no painel Streamlit pelo mesmo mecanismo
+    que executar_sistema() já usa (captura stdout).
+  - Ao final, imprime o resumo (db.resumo()) só no log - SEM popup
+    bloqueante (o script antigo tinha um messagebox de resumo). Decisão do
+    usuário: esse processo roda na máquina que hospeda o Streamlit e pode
+    ficar horas em ciclo de espera de protocolo: um popup travaria o
+    processo "rodando" pra sempre no painel, sem ninguém ali pra clicar OK.
+  - Não pede mais pra "limpar dados anteriores": o motor novo é resumível
+    por desenho (SQLite + comando reabrir), esse conceito não existe mais.
+
+Pastas de saída continuam as mesmas de sempre (C:\SEFAZ\XML ENTRADAS,
+XML SAÍDAS, CANCELADAS ENTRADAS, CANCELADAS, PRINTS SEFAZ - já eram os
+caminhos padrão do config.py do motor novo).
+
+O SEFAZ_Site.py antigo (pasta SEFAZ\) FICOU INTOCADO, só de referência -
+mesmo padrão já usado quando Solicitar_XML.py/Baixar_xml_Solicitados.py
+foram substituídos e mantidos como backup em PY\LIVRE\.
+
+Dentro da pasta "SEFAZ AUTOMAÇÃO", os atalhos .bat 1-SONDA.bat,
+2-RODAR-UMA-EMPRESA.bat e 3-VIGIA.bat foram apagados por pedido do usuário
+(eram só de teste durante o desenvolvimento do motor novo). Ficou só
+0-PAINEL.bat, que é o atalho de uso manual direto do painel.py (fora do
+launcher) - continua funcionando normalmente, sem relação com o
+SEFAZ_Site.py novo.
+
+ATUALIZADO 31/07/2026 - LOG EM DISCO (C:\SEFAZ\LOG SEFAZ\):
+Motivo: numa primeira execução real pelo launcher, o usuário viu 3 arquivos
+baixados pra uma única empresa/competência no Histórico da SEFAZ (esperado:
+2 - um lote de ENTRADA, um de SAÍDA). Investigação: NÃO é o script antigo
+rodando (conferido por grep - nada em SEFAZ_Site.py novo nem no motor
+referencia a pasta SEFAZ\ antiga) nem duplo-clique (usuário confirmou só um
+clique). Explicação mais provável, documentada no próprio portal.py
+(linhas ~869-877): solicitar_lote() clica em "Baixar todos os arquivos" -
+isso já pede o lote DE VERDADE na SEFAZ, de forma irreversível - e só DEPOIS
+tenta capturar o número do protocolo (a comentário do próprio código cita
+que isso já falhou uma vez, em 30/07, pro código 10: pedido foi feito mas o
+protocolo não foi capturado, a tarefa ficou pendente no banco, e uma
+execução seguinte pediu de novo sem saber que já existia um pedido em
+aberto). Hipótese: a IE em questão já tinha sido usada em teste manual antes
+de 31/07 (provável candidato: 2-RODAR-UMA-EMPRESA.bat, apagado nesta mesma
+sessão) e ficou um protocolo de ENTRADA "órfão" que só apareceu pronto no
+histórico da SEFAZ quando a execução de 31/07 rodou. Isto é uma fragilidade
+do motor (worker.py/portal.py), não do SEFAZ_Site.py novo - não foi
+corrigida agora (fora do pedido original), só diagnosticada.
+
+O que FOI implementado: SEFAZ_Site.py (o novo, dentro de "SEFAZ AUTOMAÇÃO")
+agora grava um log próprio por execução em C:\SEFAZ\LOG SEFAZ\
+SEFAZ_AAAAMMDD_HHMMSS.log (função iniciar_log_em_disco(), primeira linha de
+main()). Funciona via _Tee: substitui sys.stdout/sys.stderr por um objeto
+que escreve tanto no stream original (o que o launcher já captura e mostra
+no painel) quanto no arquivo em disco - então TODO print()/log do motor
+(worker.py, sessao.py, portal.py, log.py) cai automaticamente no arquivo
+também, sem precisar mexer nesses módulos. Motivo do pedido do usuário: o
+log do painel Streamlit é temporário (some ao fechar/atualizar a aba, ou se
+a sessão cair) e o processo roda no SERVIDOR (não no navegador) - se a
+janela tkinter de seleção/login não vier pra frente por algum motivo, ou se
+ninguém estiver olhando a aba quando terminar, o arquivo em disco é o único
+jeito de saber o que aconteceu de verdade. Erros não tratados também caem
+nesse arquivo (bloco try/except em volta de main() no rodapé do script).
+Este log é ADICIONAL ao log interno do motor (C:\SEFAZ\xml_go\logs\
+AAAA-MM-DD.log, já existia via log.py, por dia e não por execução) - nenhum
+dos dois substitui o outro.
+
+ATUALIZADO 03/08/2026 - ASBEM_Exectar_Sistemas.py NUNCA VAI PRO GITHUB
+(decisão do usuário): só ASBEM_Gestor_Fiscal.py é commitado/enviado ao
+GitHub (é ele que roda no Streamlit Cloud/hospedado). O launcher
+(ASBEM_Exectar_Sistemas.py), CONTEXTO_SISTEMA.txt e apps_script_empresas.gs
+ficam de propósito como arquivos LOCAIS não versionados nesta pasta -
+motivo: o launcher só faz sentido rodando na própria máquina/servidor do
+escritório, porque precisa enxergar a pasta de rede com os sistemas de
+automação (ver migração abaixo) e é ele quem dá subprocess.Popen nesses
+scripts - não teria como um Streamlit Cloud (sem acesso a essa rede local)
+executar isso. O botão "🖥️ EXECUTAR SISTEMAS" em ASBEM_Gestor_Fiscal.py
+(commitado) sobe esse launcher local como processo Streamlit próprio
+(porta 8502) e redireciona o navegador pra lá - por isso o botão só
+funciona rodando na mesma máquina que tem a pasta de rede montada.
+
+ATUALIZADO 03/08/2026 - MIGRAÇÃO PARA PASTA DE REDE (D:\ONEDRIVE\AUTOMAÇÃO\
+PROGRAMAS\EXECUSSÕES\): o dicionário SISTEMAS em ASBEM_Exectar_Sistemas.py
+parou de apontar para pastas em disco local (C:\...\PY\SISTEMAS PARA
+LUATECH\... e C:\...\PY\PREFEITURA\REST SITE\...) e passou a apontar todos
+os 5 sistemas para dentro de uma única pasta na rede da empresa, preservando
+a MESMA estrutura de subpastas de antes (só a raiz mudou, virou constante
+PASTA_SISTEMAS):
+  - CND MUNICIPAL\Gerar_CND.py
+  - PREFEITURA\DMS_Site.py
+  - PREFEITURA\REST SITE\REST_Site.py  (antes vivia numa raiz PY\PREFEITURA\
+    diferente da do DMS - unificado agora na mesma pasta PREFEITURA)
+  - SEFAZ AUTOMAÇÃO\SEFAZ_Site.py
+  - MALHA FINA SEFAZ\Malha_Fina.py
+Motivo: o Streamlit (ASBEM_Gestor_Fiscal.py) já roda hospedado, e agora o
+launcher (ASBEM_Exectar_Sistemas.py) também - subprocess.Popen roda na
+MÁQUINA QUE HOSPEDA o Streamlit (ver decisão de produto da seção 6), então
+só funciona rodar os sistemas se essa máquina tiver acesso de rede à pasta
+onde os scripts estão. É responsabilidade do usuário garantir que todo o
+conteúdo das pastas antigas (scripts + arquivos que eles importam, ex:
+CND_*.py dentro de MUNICÍPIOS GOIÁS, os módulos config.py/db.py/worker.py/
+etc do motor SEFAZ AUTOMAÇÃO) seja copiado para dentro da nova pasta,
+mantendo a mesma estrutura relativa - só a raiz do caminho foi trocada no
+código, o conteúdo das pastas não foi migrado por esta sessão.
+
+ATUALIZADO 31/07/2026 - ESPERA RÁPIDA DE PROTOCOLO (worker.py + config.py):
+Usuário reportou que o código ficava parado minutos aguardando um protocolo
+que às vezes já estava pronto na SEFAZ em segundos. Causa confirmada no
+código: depois de pedir os lotes, o único caminho de espera era
+_ciclo_dos_protocolos() - fecha o navegador, dorme INTERVALO_CICLO (10 min,
+config.py) inteiros, reabre e checa nervoso de novo. Sem checagem curta
+entre o pedido e essa espera longa, um protocolo pronto em 3 segundos só
+era percebido no próximo múltiplo de 10 minutos. O intervalo de 10 min é de
+propósito (não é bug) - evita logar de novo com frequência, que é o que já
+fez o Cloudflare pedir verificação manual em DMS_Site.py/REST_Site.py.
+
+Correção: nova função _espera_rapida_protocolos() em worker.py, chamada
+dentro de executar() logo depois do passo5_protocolos() que já roda ao
+final de processar() - ainda com o MESMO navegador/sessão aberto (sem
+relogar), confere de novo a cada INTERVALO_ESPERA_RAPIDA (20s, novo em
+config.py) por até ESPERA_RAPIDA_SEGUNDOS (5 min). Só o que continuar
+pendente depois desse teto curto cai no _ciclo_dos_protocolos() de sempre
+(fecha/espera 10 min/reabre) - esse caminho longo continua existindo,
+intocado, para pendência de verdade. Ambos os novos valores são
+configuráveis por variável de ambiente (XMLGO_ESPERA_RAPIDA,
+XMLGO_INTERVALO_RAPIDO), no mesmo padrão dos demais tempos do config.py.
+
+Nota à parte, sobre uma dúvida do usuário no mesmo dia: ele suspeitou que as
+canceladas (passos 2/4) também estivessem clicando em "Baixar todos os
+arquivos" e pedindo protocolo, o que explicaria downloads a mais. Conferido
+no código (worker.py, _busca_canceladas(), linhas ~294-337): não é o caso -
+essa função nunca chama solicitar_lote()/registrar_protocolo(), só lê a
+listagem página a página e baixa o evento de cada cancelada direto por
+HTTP, sem lote nem protocolo (comentário da própria função confirma). Se o
+comportamento observado no servidor continuar parecendo diferente disto,
+verificar se o código rodando lá é realmente esta mesma versão (o servidor
+ainda não está na pasta definitiva, ver nota logo acima).
+
+ATUALIZADO 31/07/2026 (mesmo dia, depois) - DESCOBERTA IMPORTANTE: o
+usuário colou o log completo de uma execução real pelo launcher, e é
+100% identificável como sendo do SEFAZ_Site.py ANTIGO (pasta SEFAZ\, não
+SEFAZ AUTOMAÇÃO\) - strings como "[Fase 1] Iniciando Chrome...",
+"TOTAL A SOLICITAR", "[Eventos] Refazendo busca de ENTRADAS para baixar
+eventos (downloadOption=2)...", "nova checagem em 3 min" batem literalmente
+com linhas específicas do arquivo antigo (1315, 1419, 1632, 1678, 2168) e
+NÃO existem em lugar nenhum do motor novo (que usa log.py/worker.py, com
+formato "PASSO 1 — ENTRADAS...").
+
+Isso explica TODAS as dúvidas anteriores de uma vez, sem precisar de mais
+suposição: o script antigo por design pede 3 lotes com protocolo por
+empresa (ENTRADA notas, ENTRADA eventos/canceladas via downloadOption=2,
+SAÍDA notas - só SAÍDA canceladas vai direto por fetch), e o intervalo de
+checagem dele é fixo em 3 min (INTERVALO_VERIFICACAO_PROTOCOLO, dentro do
+próprio SEFAZ\SEFAZ_Site.py) - nada disso tem relação com o motor novo.
+
+Conclusão: o SISTEMAS["SEFAZ Site"] foi trocado no ASBEM_Exectar_Sistemas.py
+desta pasta (seção acima), mas o Streamlit que está de pé no servidor
+aparentemente NÃO está lendo o arquivo desta pasta (ou está lendo uma cópia
+desatualizada/separada) - nada do que foi implementado nesta sessão (novo
+SEFAZ_Site.py, log em disco em C:\SEFAZ\LOG SEFAZ\, espera rápida de
+protocolo em worker.py/config.py) rodou de fato ainda. PENDENTE: confirmar
+com o usuário de onde o processo do servidor realmente lê
+ASBEM_Exectar_Sistemas.py, e garantir que aponte para esta pasta (ou migrar
+pra lá, conforme o "passo seguinte" já mencionado antes) antes de tentar
+validar qualquer uma das mudanças feitas hoje.
+
+NOTA (03/08/2026): a dúvida acima ("onde o servidor lê ASBEM_Exectar_
+Sistemas.py") ficou resolvida pela descoberta da seção 10 abaixo - o Gestor
+Fiscal está no Streamlit Community Cloud (não em servidor próprio nenhum),
+e o launcher nunca esteve lá; é local por design.
+
+------------------------------------------------------------------------
+10) ARQUITETURA REAL DE HOSPEDAGEM + EMPRESAS MOVIDO PRO GESTOR FISCAL
+    (03/08/2026)
+------------------------------------------------------------------------
+Descoberta importante nesta sessão: ASBEM_Gestor_Fiscal.py está publicado no
+Streamlit Community Cloud (share.streamlit.io), conectado ao GitHub - ou
+seja, roda nos servidores do próprio Streamlit, sem qualquer acesso a disco
+local ou rede do escritório. Isso muda como tudo se encaixa:
+
+a) BOTÃO "EXECUTAR SISTEMAS" (ASBEM_Gestor_Fiscal.py) - corrigido: a versão
+   anterior tentava subir o launcher sozinho via subprocess.Popen + checagem
+   de "localhost" (fazia sentido só se os dois painéis rodassem na mesma
+   máquina, o que nunca foi o caso). Como o Gestor Fiscal roda num container
+   na nuvem, esse Popen nunca teria acesso a nada da rede do escritório, e
+   "localhost" dentro do container não é o mesmo "localhost" de quem clicou.
+   Agora o botão só REDIRECIONA (meta refresh) pra um endereço FIXO da rede
+   do escritório: http://192.168.1.250:8502 (constantes EXECUTAR_SISTEMAS_
+   HOST/PORT/URL, topo do arquivo). Pra isso funcionar, o launcher precisa
+   estar rodando manualmente naquela máquina (streamlit run
+   ASBEM_Exectar_Sistemas.py --server.port 8502 --server.address 0.0.0.0),
+   e só quem estiver na rede do escritório (mesma LAN que 192.168.1.250)
+   consegue de fato abrir - navegador de fora não alcança IP privado.
+
+b) LAUNCHER SEM PYTHON/ADMIN NA MÁQUINA DO ESCRITÓRIO: a máquina que vai
+   hospedar o launcher (192.168.1.250) não tinha Python, VS Code, nem
+   permissão de administrador pro usuário instalar nada. Solução: Python
+   "embeddable" (distribuição portátil oficial do python.org, só
+   descompacta, não instala) foi montado numa sessão anterior com TODAS as
+   dependências dos 5 sistemas (streamlit, pandas, requests, openpyxl,
+   selenium, undetected_chromedriver, playwright + Chromium embutido,
+   pyautogui, pywinauto, pygetwindow, psutil, pyperclip, reportlab, Pillow,
+   pdfminer.six, pywin32) MAIS tkinter enxertado manualmente (a distribuição
+   embeddable não inclui tkinter por padrão - _tkinter.pyd, tcl86t.dll,
+   tk86t.dll e as pastas tcl8.6/tk8.6 foram copiados de uma instalação cheia
+   do Python 3.11 desta máquina de dev). Resultado ficou compactado num
+   Launcher_Portatil.zip com um Iniciar_Launcher.bat (seta TCL_LIBRARY,
+   TK_LIBRARY, PLAYWRIGHT_BROWSERS_PATH e PYTHONNOUSERSITE=1 antes de rodar
+   streamlit) pra copiar pra dentro de D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\
+   EXECUSSÕES\ via Área de Trabalho Remota. PENDENTE: usuário ainda não
+   confirmou ter extraído/rodado isso na máquina do escritório - retomar daí
+   se for continuar esse fio.
+   Falta separada: undetected_chromedriver (usado por Gerar CND/DMS/REST)
+   precisa do Google Chrome de verdade instalado (Playwright/SEFAZ Site e
+   Malha Fina não, o Chromium já vem embutido) - aquela máquina só tinha
+   Edge. Chrome tem instalador per-user que não pede admin, ainda pendente
+   de confirmação se foi instalado.
+   Firewall: porta 8502 pode precisar de liberação manual (netsh advfirewall
+   ... dir=in action=allow protocol=TCP localport=8502), o que exige admin -
+   torcer pra o prompt padrão do Windows dar pra aceitar sem elevação (varia
+   por configuração), senão precisa de alguém com admin uma vez só.
+
+c) MENU EMPRESAS MOVIDO DO LAUNCHER PRO GESTOR FISCAL: o usuário lembrou que
+   tinha pedido edição/cadastro/inclusão em lote de empresas (sincronizado
+   com a planilha GERAL via Apps Script) e não estava achando - descoberto
+   que a funcionalidade tinha sido implementada no arquivo errado
+   (ASBEM_Exectar_Sistemas.py, local-only, não no ar pra ninguém usar no
+   dia a dia). Migrado pra dentro de pagina_empresas() em
+   ASBEM_Gestor_Fiscal.py - como essa função é chamada uma única vez (um só
+   ponto de entrada), a edição/cadastro/lote aparece automaticamente nos
+   três módulos que usam essa tela (FISCAL, PARALEGAL, CONTÁBIL), sem
+   precisar duplicar em cada um. Foi removido de vez do launcher (decisão do
+   usuário - não ficou duplicado).
+   O que foi movido: constantes APPS_SCRIPT_EMPRESAS_URL, REGIMES_PADRAO,
+   COLUNAS_LOTE_EMPRESAS; funções _cnpj_digitos/_formata_cnpj (com o cuidado
+   de int(float(...)) antes do zfill, ver seção 5), _texto,
+   _enviar_empresas_apps_script, _gerar_modelo_empresas_excel,
+   _validar_lote_empresas; e as 3 seções de UI (✏️ Editar empresa existente,
+   ➕ Cadastrar nova empresa, 📦 Incluir empresas em lote), logo abaixo da
+   tabela "Empresas - Apenas ATIVAS" que já existia ali. Keys dos widgets
+   Streamlit (selectbox/form/button) ganharam sufixo "_gf" pra não colidir
+   com nada existente. O import solto "import re # adicione no topo..." que
+   já estava no meio do arquivo (por uma sessão anterior) foi promovido pro
+   topo de verdade, junto com o novo "from openpyxl.worksheet.datavalidation
+   import DataValidation".
+   Como o Apps Script de EMPRESAS é só uma chamada HTTP (requests.post), não
+   depende de disco/rede local nenhuma - funciona normalmente rodando na
+   nuvem do Streamlit, diferente do problema do item (a) acima.
+   ASBEM_Exectar_Sistemas.py voltou a ser só a tela SISTEMAS (o menu lateral
+   com os botões pra rodar CND/DMS/REST/SEFAZ/Malha Fina + log de execução).
+
+------------------------------------------------------------------------
+11) MENU FISCAL "CLIENTES/FORNEC CNPJ" (20/08/2026)
+------------------------------------------------------------------------
+Nova pagina em ASBEM_Gestor_Fiscal.py (pagina_clientes_fornecedores_cnpj(),
+menu FISCAL) para analisar as relacoes de Clientes/Fornecedores por CNPJ.
+E SO LEITURA - nada e gravado na GERAL nem em nenhum Apps Script, entao
+nao se aplica a regra de "cell-level only" das outras secoes (essa regra e
+so sobre escrita).
+
+Fluxo: usuario sobe duas planilhas exportadas do sistema/ERP contabil
+("Entradas - Resumo Fornecedor CNPJ" e "Saidas - Resumo Cliente CNPJ",
+modelo de referencia ficou em C:/Users/luann/Downloads/X). O relatorio
+original vem com metade das colunas mescladas/vazias; em vez de pedir pro
+usuario desmesclar manualmente, o codigo ja le direto pelas posicoes fixas
+de coluna (a mesclagem no Excel deixa os dados sempre nas mesmas colunas,
+alternando com colunas vazias): A=Codigo da empresa (codigo interno do
+escritorio, bate com a coluna "Codigo" da aba GERAL), C=Nome do
+FORNECEDOR/CLIENTE (terceiro, nao e empresa do escritorio), E=CNPJ desse
+terceiro, H=Especie da Nota Fiscal, X=Valor, Z=Base de calculo ICMS,
+AB=Valor do ICMS. O cabecalho de verdade esta na linha 4 (indice 3) e o
+texto ali ("fornecedor" ou "cliente" na mesma posicao da coluna C) e usado
+pra confirmar automaticamente qual dos dois relatorios foi enviado em cada
+upload. A ultima linha de cada arquivo e um rodape "Total de : NNNN" que e
+descartado (linhas sem Codigo numerico ou sem Nome sao descartadas).
+
+Cruzamento com a GERAL: usa so o Codigo pra filtrar Situacao=ATIVA e trazer
+a Razao Social da empresa do escritorio (mesmo padrao de leitura read-only
+ja usado em pagina_sefaz_comparacao/pagina_sem_acesso, via
+le_planilha_google()) - nao tem escrita nenhuma envolvida.
+
+Tela final: filtro por empresa + tipo (Cliente/Fornecedor), cards de
+resumo, dois graficos Plotly (donut Clientes x Fornecedores por valor, e
+barra horizontal Top 10 por valor), lista em AgGrid, botao de download em
+Excel, e uma "area de impressao" (expander com tabela HTML simples + CSS
+media print que esconde sidebar/menu/botoes do Streamlit) porque o
+AgGrid nao imprime bem (e virtualizado/scroll).
+
+LIMITACAO DO .XLS CORROMPIDO - RESOLVIDA DE VERDADE (20/08/2026, mesmo dia,
+depois de o usuario bater nisso na pratica): os arquivos .xls reais de
+exemplo (a dupla em Downloads/X) tem o BIFF corrompido de um jeito que so o
+parser tolerante do Excel de verdade abria antes desta correcao -
+xlrd/pandas.read_excel falhavam com "Unsupported format, or corrupt file:
+Expected BOF record" mesmo com ignore_workbook_corruption=True. Investigando
+a fundo: o registro BOUNDSHEET (que diz em que posicao do stream comeca o
+BOF de cada planilha) vem com um offset que nao aponta pra lugar nenhum
+valido - confirmado que NAO e bug de remontagem do stream OLE (reextracao
+manual via olefile deu byte-identico ao que o proprio xlrd extrai), entao a
+corrupcao esta mesmo nos dados do registro BOUNDSHEET, bug da ferramenta
+que gerou o .xls. Mas em compensacao: o BOF de verdade da planilha (a
+assinatura de registro Worksheet BOF, opcode 0x0809 com dt=0x0010) sempre
+aparece em algum lugar do stream, so nao onde o BOUNDSHEET diz. Solucao
+implementada em ASBEM_Gestor_Fiscal.py (_corrige_offset_planilha_xls +
+_xlrd_sheet_para_dataframe, usadas dentro de _le_planilha_cliente_fornec):
+tenta ler o .xls normalmente primeiro; se der esse erro especifico, monta
+um xlrd.book.Book() na mao (mesma sequencia interna que
+xlrd.open_workbook_xls faria: biff2_8_load -> getbof(globals) ->
+parse_globals()), procura a assinatura do BOF de planilha no restante do
+stream, e SO substitui o offset guardado (bk._sh_abs_posn) quando da pra
+casar 1-pra-1 sem ambiguidade (mesma quantidade de BOFs encontrados e de
+planilhas com offset invalido) antes de continuar o parse normalmente -
+se nao der pra casar com certeza, desiste e mostra a mensagem antiga
+pedindo pra salvar como .xlsx manualmente (fallback ainda existe, so nao e
+mais o caminho principal). "xlrd" foi acrescentado ao requirements.txt.
+Bonus descoberto durante o teste: a correcao le a coluna de CNPJ como TEXTO
+puro do jeito que estava gravado no .xls original (com zero a esquerda
+certo), sem nenhum arredondamento por float - mais confiavel ainda que
+converter o arquivo pra .xlsx pelo Excel (que forca a coluna pra numero e
+so preserva o zero a esquerda por causa do tratamento de
+_cnpj_digitos/_formata_cnpj feito depois). Validado de ponta a ponta com
+os dois arquivos .xls originais (sem nenhuma conversao manual) contra a
+planilha GERAL ao vivo: bateu com o rodape "Total de :" de cada arquivo
+(6609 fornecedores, 4353 clientes).
+
+Atencao pra proxima sessao que mexer em CNPJ neste arquivo: ja existem DUAS
+familias de helper de CNPJ nele. _cnpj_digitos/_formata_cnpj (linhas
+~1080-1098, usadas originalmente pra EMPRESAS) fazem int(float(valor)) ANTES
+do zfill(14) - certo, preserva zero a esquerda. _normaliza_cnpj/
+_formata_cnpj_mascara (linhas ~1489-1505, usadas em pagina_sefaz_comparacao/
+pagina_sem_acesso/pagina_simples) fazem zfill so depois de ja ter descartado
+o ".0" so quando a string da exatamente 15 caracteres - isso quebra pra CNPJ
+que originalmente tem zero a esquerda (ex: 01847854000332 vira float
+1847854000332.0, str() ja sai com 14 digitos apos limpar o ".0", a
+checagem "if len==15" nunca dispara, e o zero a esquerda nunca volta). A
+pagina nova (CLIENTES/FORNEC CNPJ) usa de proposito a familia correta
+(_cnpj_digitos/_formata_cnpj). As tres paginas antigas que usam a familia
+com bug NAO foram mexidas (fora do escopo pedido) - e uma pendencia aberta,
+so sinalizada aqui, pra corrigir se algum dia aparecer reclamacao de CNPJ
+errado exibido nelas.
+
+
+------------------------------------------------------------------------
+12) CLIENTES/FORNEC CNPJ - PERSISTENCIA NA SESSAO + PLANILHA ONLINE
+    (20/08/2026, mesmo dia, depois de feedback do usuario)
+------------------------------------------------------------------------
+Dois ajustes pedidos depois de usar a pagina pela primeira vez:
+
+a) GRAFICO TOP 10 agrupado por CNPJ (nao so por Nome) - reparado que o
+   mesmo CNPJ aparece com grafias de nome diferentes nas notas (ex:
+   "CENTRO AR REFRIGERACAO AUTO" x "...AUTOMOTIVA LTDA", mesmo CNPJ
+   08995663000103), o que inflava a lista em barras separadas pro mesmo
+   fornecedor/cliente de verdade. Agora agrupa por CNPJ+Tipo (usando o
+   primeiro Nome visto como rotulo) e cada barra mostra o valor em R$
+   escrito do lado (textposition="outside").
+
+b) DADOS SUMINDO AO TROCAR DE MENU - o Streamlit esvazia o widget
+   file_uploader quando a pagina nao e desenhada num rerun (troca de menu
+   = a funcao da pagina nem roda), entao o arquivo enviado "sumia". Corrigido
+   guardando o resultado ja processado em st.session_state
+   (cf_dados_fornecedor/cf_dados_cliente/cf_nome_fornecedor/cf_nome_cliente)
+   de forma independente do proprio widget - continua valendo ate o usuario
+   mandar uma planilha nova, mesmo trocando de menu.
+
+c) PERSISTENCIA NA PLANILHA ONLINE (pedido explicito do usuario: sobreviver
+   a F5 e aparecer pra qualquer pessoa do escritorio sem reenviar arquivo).
+   Seguindo o MESMO padrao ja usado pra EMPRESAS (Apps Script ISOLADO, projeto
+   e URL proprios - o usuario ja tinha rejeitado reaproveitar script existente
+   numa sessao anterior, ver secao 4 e memoria user-feedback-cnpj-and-sheet-
+   safety): criado apps_script_cliente_fornecedor.gs (guardado aqui so como
+   referencia/backup, igual aos outros - colar no editor do Apps Script e
+   implantar manualmente pra valer).
+     - Usuario ja criou a aba "DADOS" manualmente na planilha online. A aba
+       "DADOS_META" (guarda nome dos arquivos + data/hora da ultima
+       atualizacao) e criada sozinha pelo proprio Apps Script na primeira
+       execucao, se nao existir.
+     - Diferente da GERAL: aqui e SEGURO fazer clearContents() + reescrever a
+       aba inteira, porque DADOS/DADOS_META so existem pra este recurso e sao
+       geradas 100% a partir do Python - nenhum outro sistema le ou escreve
+       nelas (mesmo raciocinio ja usado nas abas CERTIFICADOS/EMAIL/MENSAGEM
+       do Apps Script mais antigo).
+     - O que e salvo e o RESULTADO JA CRUZADO com a GERAL (Codigo, Empresa,
+       Tipo, Nome, CNPJ, Especie NF, Valor, Base ICMS, Valor ICMS) - nao os
+       arquivos brutos - pra nao precisar reprocessar nada ao carregar de
+       volta. So salva quando teve upload novo na execucao (nao fica
+       regravando a planilha a toa a cada interacao/filtro).
+     - Cuidado tecnico no .gs: a coluna CNPJ (e Codigo) e formatada como
+       texto (setNumberFormat("@")) ANTES do setValues - se fosse depois, o
+       Sheets ja teria convertido o valor pra numero e perdido o zero a
+       esquerda (mesma familia de bug da secao 5, agora do lado do Apps
+       Script em vez do Python).
+     - Python: APPS_SCRIPT_CLI_FORNEC_URL (em ASBEM_Gestor_Fiscal.py, perto
+       das outras constantes da secao CLIENTES/FORNEC CNPJ) comeca VAZIA -
+       so funciona depois que o usuario publicar o Apps Script e me passar a
+       URL pra colar ali. Ate la, a pagina funciona normalmente (upload +
+       persistencia de sessao do item b), so a gravacao na planilha online
+       fica inativa e mostra aviso amarelo em vez de quebrar.
+     - Fluxo de leitura: se nao tem nada na sessao nem upload novo, tenta
+       carregar da aba DADOS antes de pedir pro usuario enviar arquivo -
+       nesse caminho o cruzamento com GERAL e PULADO (os dados salvos ja
+       vem cruzados), e aparece um aviso "Mostrando os ultimos dados salvos
+       na planilha online (atualizado em ...)".
+
+RESOLVIDO (mesmo dia, 20/08/2026, apos publicar e testar de ponta a ponta):
+APPS_SCRIPT_CLI_FORNEC_URL preenchida e validada com o volume real (10.592
+linhas, 295 empresas, 6332 fornecedores + 4260 clientes, gravacao em ~13s -
+bem dentro do limite de execucao do Apps Script). Dois problemas reais
+apareceram no caminho, documentados aqui porque podem se repetir em
+qualquer Apps Script novo:
+
+1. 401 mesmo com "Quem pode acessar: Qualquer pessoa" aparentemente
+   selecionado - editar a implantacao existente (Implantar > Gerenciar
+   implantacoes > lapis > Nova versao) NAO aplicou a mudanca de permissao
+   corretamente (bug conhecido do editor do Apps Script, ja visto antes).
+   Solucao que funcionou: criar uma implantacao NOVA do zero (Implantar >
+   Nova implantacao, nao editar a existente) - isso gera uma URL nova mas
+   sai limpa, sem nenhum estado preso da implantacao anterior. A URL final
+   ficou diferente da primeira URL publicada (fica registrada em
+   APPS_SCRIPT_CLI_FORNEC_URL no Python, a antiga foi abandonada). Rodar a
+   funcao autorizar() manualmente uma vez (Executar no editor, aceitar a
+   tela de permissao) tambem foi necessario, mas nao era a causa do 401 em
+   si (a autorizacao ja tinha sido concedida antes, confirmado rodando e
+   vendo o log "ASBEM EMPRESAS" sem popup de permissao aparecer de novo) -
+   o 401 era mesmo a implantacao presa.
+
+2. CNPJ perdia o zero a esquerda ao LER de volta a aba DADOS (ex:
+   01847854000332 virava 1847854000332), mesmo com o .gs fazendo
+   setNumberFormat("@") + flush() + prefixo de apostrofo ANTES do
+   setValues() (todas as tres tecnicas classicas pra forcar texto, nenhuma
+   resolveu sozinha nem juntas). Causa raiz identificada: NAO e um problema
+   de gravacao - e o proprio export?format=xlsx do Google Sheets (o mesmo
+   mecanismo de leitura usado em GOOGLE_SHEET_URL/le_planilha_google() pra
+   TUDO neste sistema, inclusive a GERAL) que reconverte texto-que-parece-
+   numero de volta pra numero no arquivo .xlsx gerado, independente da
+   celula estar formatada como texto de verdade dentro do Sheets. E
+   literalmente a MESMA causa raiz do bug de CNPJ documentado na secao 5
+   (perda de zero a esquerda ao ler a coluna CNPJ da GERAL) - so que
+   ninguem tinha reparado que ela tambem se aplica a QUALQUER aba lida por
+   esse mecanismo, nao so a GERAL. Solucao: nao adianta tentar evitar isso
+   do lado da gravacao (Apps Script) - _carrega_cli_fornec_da_planilha() no
+   Python reconstroi CNPJ/Codigo com o mesmo padrao int(float(...))+zfill
+   (via _cnpj_digitos) logo apos ler a aba DADOS, do mesmo jeito que
+   qualquer leitura de CNPJ vinda da GERAL ja fazia. O setNumberFormat("@")
+   + apostrofo no .gs foram mantidos mesmo assim (deixam a celula certa pra
+   quem abrir a planilha direto no navegador, so nao sobrevivem ao export
+   xlsx) - nao fazem mal, so nao sao suficientes sozinhos.
+
+
+------------------------------------------------------------------------
+13) CLIENTES/FORNEC CNPJ - AJUSTES DE UI (20/08/2026, mesmo dia)
+------------------------------------------------------------------------
+a) BUG MEU CORRIGIDO: apos criar a implantacao NOVA do Apps Script (secao
+   12, item 1) pra contornar o 401, so atualizei APPS_SCRIPT_CLI_FORNEC_URL
+   com a URL nova nos meus scripts de teste soltos, esqueci de propagar a
+   mudanca pro ASBEM_Gestor_Fiscal.py de verdade - o arquivo real ficou
+   apontando pra primeira URL (que nunca funcionou), entao o usuario
+   continuou vendo 401 ao usar o app de verdade mesmo com tudo aparentando
+   estar corrigido. Corrigido - conferir sempre que a URL usada nos testes
+   soltos bate com a constante no arquivo real antes de dar por resolvido.
+
+b) GRAFICO TOP 10 SEPARADO POR TIPO: o grafico unico misturando Clientes e
+   Fornecedores juntos (cores diferentes na mesma lista) ficava confuso.
+   Separado em dois graficos de barra lado a lado - "Top 10 Clientes por
+   Valor" (verde) e "Top 10 Fornecedores por Valor" (vermelho), cada um so
+   com CNPJs do seu proprio tipo. Se o filtro "Tipo" da pagina ja estiver
+   em CLIENTE ou FORNECEDOR (nao "Todos"), mostra so o grafico
+   correspondente (o outro nao faria sentido, ficaria vazio). O donut
+   Clientes x Fornecedores continua unico e centralizado acima dos dois.
+
+
+------------------------------------------------------------------------
+14) CLIENTES/FORNEC CNPJ - IMPRIMIR SO RESUMO + GRAFICOS (20/08/2026,
+    mesmo dia)
+------------------------------------------------------------------------
+Removido o botao "Ver lista para impressao" (modal com a tabela inteira) -
+nao fazia mais sentido depois de existir o download em Excel. A "Area de
+impressao" foi renomeada pra "IMPRIMIR" e trocou de conteudo: em vez da
+tabela HTML completa, mostra so o nome da empresa filtrada (ou "Todas as
+empresas"), os cards de resumo (Empresas ATIVAS, Clientes/Fornecedores
+unicos, Valor Clientes/Fornecedores) e os mesmos graficos ja construidos
+mais acima (donut Clientes x Fornecedores + Top 10 Clientes/Top 10
+Fornecedores, reaproveitados via as variaveis fig_donut/fig_cli/fig_forn,
+sem reconstruir nada) - cada um so aparece se existir (fig_cli/fig_forn
+comecam como None e so sao preenchidos se o filtro Tipo permitir aquele
+lado). A lista detalhada linha a linha so continua disponivel via download
+em Excel (o botao "Baixar Excel" ficou sozinho, sem mais dividir coluna com
+o botao removido).
+
+
+------------------------------------------------------------------------
+15) CLIENTES/FORNEC CNPJ - BOTAO DE IMPRIMIR DE VERDADE (20/08/2026,
+    mesmo dia)
+------------------------------------------------------------------------
+O expander "IMPRIMIR" (secao 14) so REVELA o conteudo - nao dispara a
+impressao sozinho, precisa apertar Ctrl+P/Cmd+P manualmente. Ao renomear
+de "Area de impressao" pra "IMPRIMIR" nesta mesma sessao, essa instrucao
+foi removida sem querer do texto, e o usuario nao sabia que precisava
+apertar Ctrl+P depois de abrir. Corrigido com duas coisas:
+  - Um botao real "Imprimir / Salvar como PDF" dentro do expander, via
+    st.components.v1.html() com um <button onclick="window.parent.print()">
+    - precisa ser via components.html() (nao st.markdown) porque tags
+    <script>/onclick injetadas via st.markdown(unsafe_allow_html=True) nao
+    executam no Streamlit (o React usa dangerouslySetInnerHTML, que nao
+    roda <script> embutido) - components.html() roda dentro de um iframe
+    de verdade, que executa JS normalmente. window.parent.print() (nao só
+    window.print()) e necessario porque senao ele imprimiria só o conteudo
+    do proprio iframe (so o botao), nao a pagina inteira - funciona porque
+    o Streamlit Cloud serve tudo same-origin. O proprio botao se esconde
+    sozinho na impressao via um <style>@media print{button{display:none}}
+    </style> DENTRO do mesmo HTML do componente (o CSS de impressao
+    injetado no documento principal, feito via st.markdown, NAO alcança o
+    conteudo interno de um iframe - cada iframe precisa da sua propria
+    regra @media print).
+  - Texto explicando a alternativa manual (Ctrl+P/Cmd+P) e como escolher
+    "Salvar como PDF" no destino da impressora, caso o botao nao funcione
+    nalgum navegador especifico.
+
+
+------------------------------------------------------------------------
+16) CLIENTES/FORNEC CNPJ - IMPRESSAO TRAZIA A TELA INTEIRA (20/08/2026,
+    mesmo dia)
+------------------------------------------------------------------------
+O botao "Imprimir/Salvar como PDF" (secao 15) disparava a impressao de
+verdade, mas o CSS so escondia sidebar/toolbar/botoes - o RESTO do
+conteudo principal (filtros, cards de resumo que ja aparecem mais acima,
+os graficos duplicados, a tabela AgGrid inteira) continuava aparecendo
+no PDF junto com a area do expander "IMPRIMIR". Trocado pela tecnica
+classica de impressao seletiva: esconder TUDO por padrao
+(`body * { visibility: hidden }`) e so revelar de volta o conteudo do
+expander (`[data-testid="stExpander"] * { visibility: visible }` +
+`position: absolute` no proprio expander pra ocupar a folha inteira em vez
+de deixar um espaco em branco enorme onde a pagina "invisivel" ainda
+ocupava lugar). Validado de verdade com Playwright (emulate_media("print")
++ screenshot) numa pagina de teste isolada reproduzindo a mesma estrutura -
+confirmado que só sobra o conteúdo do expander, nada do resto da pagina.
+
+
+------------------------------------------------------------------------
+17) CLIENTES/FORNEC CNPJ - PDF CORTADO + NOME DO ARQUIVO (20/08/2026,
+    mesmo dia)
+------------------------------------------------------------------------
+Depois da correcao da secao 16 (impressao seletiva funcionando), o PDF
+gerado vinha CORTADO na largura - os cards de resumo e principalmente o
+grafico "Top 10 Fornecedores" (nomes longos + barra) ficavam cortados a
+direita. Causa: o `position: absolute; width: 100%` aplicado no
+`[data-testid="stExpander"]` faz o elemento ocupar a largura TOTAL DA TELA
+do usuario (ex: 1400px+, a largura da janela do navegador com a sidebar
+ainda ocupando espaco no calculo), que e bem maior que a largura util de
+uma folha impressa (~1100px em A4 paisagem) - o navegador nao redimensiona
+esse conteudo sozinho pra caber no papel, so corta o que nao cabe.
+
+Corrigido com escala automatica calculada via JavaScript, registrada nos
+eventos `beforeprint`/`afterprint` do DOCUMENTO PRINCIPAL (nao do iframe do
+componente - precisa ser `window.parent.addEventListener(...)`, chamado de
+dentro do `components.html()` do botao de imprimir, ja que scripts dentro
+de `st.markdown(unsafe_allow_html=True)` nao executam no Streamlit -
+React usa dangerouslySetInnerHTML, que ignora tags <script>). No momento
+que a impressao dispara: mede `scrollWidth` do `[data-testid="stExpander"]`
+de verdade (a largura que ele ocupa naquele instante, seja qual for a
+resolucao de tela do usuario) e aplica `transform: scale(1100/scrollWidth)`
++ `transformOrigin: top left` só se precisar encolher - reduzir a largura
+proporcionalmente tambem reduz a altura junto, ajudando a caber numa unica
+pagina verticalmente tambem. Reverte tudo (`transform: ''`) no afterprint.
+Cuidado tecnico: como o Streamlit recria o iframe do componente a cada
+rerun do script mas `window.parent` (a janela real) NAO e recriada, os
+listeners se acumulariam a cada rerun se nao fossem removidos primeiro -
+o handler eh guardado em `window.parent._cfPrintBefore/_cfPrintAfter` e
+removido explicitamente (`removeEventListener`) antes de registrar de novo.
+Tambem foi adicionado `@page { size: landscape; margin: 10mm; }` no CSS de
+impressao (o conteudo e naturalmente mais largo que alto).
+
+Validado com Playwright, mas de um jeito diferente do teste anterior:
+`window.print()` real abre uma UI nativa do SO que o Playwright nao
+consegue automatizar, entao o teste chama `window._cfPrintBefore()` /
+`_cfPrintAfter()` diretamente (as funcoes registradas pelos listeners) e
+confere o resultado - confirmado troca de titulo e calculo de escala
+corretos (ex: 1184px de conteudo real -> scale(0.929) pra caber em
+1100px), e visualmente (screenshot com emulate_media("print")) que o
+grafico com nomes longos + valores parou de cortar.
+
+NOME DO ARQUIVO AO SALVAR COMO PDF: o Chrome usa o `document.title` da
+pagina (o texto da aba do navegador) como nome sugerido do arquivo ao
+"Salvar como PDF" - por isso o mesmo listener `beforeprint` tambem troca
+temporariamente `document.title` pra "Clientes_Fornecedores - {Codigo} -
+{Empresa}" (ou "Clientes_Fornecedores - Todas as empresas" se nenhuma
+empresa especifica estiver filtrada), e `afterprint` restaura o titulo
+original ("Streamlit") depois - assim a pagina normal do navegador nao
+fica com o titulo errado depois de imprimir.
+
+
+------------------------------------------------------------------------
+18) CLIENTES/FORNEC CNPJ - PDF EM 3 PAGINAS + CENTRALIZACAO (20/08/2026,
+    mesmo dia, depois de teste real do usuario)
+------------------------------------------------------------------------
+O usuario testou de verdade (gerou o PDF real pelo Chrome dele) e reportou
+2 problemas na correcao da secao 17: o PDF saia em 3 paginas (so a primeira
+com conteudo, as outras 2 em branco) e a centralizacao nao ficava boa.
+Investigacao mais profunda revelou TRES causas raiz empilhadas, cada uma
+só aparecendo depois de resolver a anterior - documentado aqui porque
+qualquer implementacao futura de "imprimir só uma parte da pagina" no
+Streamlit provavelmente vai esbarrar nas mesmas:
+
+1. `visibility: hidden` no body inteiro (a tecnica da secao 16) esconde
+   visualmente o resto da pagina mas NAO reduz a ALTURA real do documento
+   (visibility preserva o espaco no fluxo, diferente de display:none) - o
+   navegador continuava paginando com base na altura ORIGINAL gigante da
+   pagina (sidebar + filtros + tabela AgGrid inteira + graficos duplicados
+   que ja aparecem na tela normal), gerando varias paginas mesmo com quase
+   tudo invisivel. Trocado por uma tecnica sem visibility: subir a arvore
+   de ancestrais do elemento alvo ate o body, escondendo (display:none) os
+   IRMAOS de cada ancestral no caminho (nao o proprio ancestral, que
+   precisa continuar visivel) - isso reduz o fluxo/altura de verdade.
+
+2. Mesmo reduzindo a altura dos irmaos, o `document.documentElement.
+   scrollHeight` continuava batendo com a altura da VIEWPORT (testado
+   mudando o viewport do navegador de teste e vendo o scrollHeight mudar
+   junto) - isso e comportamento PADRAO de qualquer navegador (a altura de
+   scroll de um documento nunca e menor que a altura da janela visivel,
+   mesmo com pouco conteudo) e nao da pra desfazer via CSS (height:auto,
+   min-height:0 e overflow:hidden no html/body nao mudam isso). A saida foi
+   nao depender dessa medida: em vez de tentar encolher html/body, calcula
+   a escala necessaria baseada no proprio ELEMENTO ALVO (scrollWidth/
+   scrollHeight dele, nao da pagina toda) comparado com o tamanho de uma
+   folha (1100x720px, aproximando A4/Letter paisagem com margem).
+
+3. Depois de calcular a escala certa, aplicar so `transform: scale()` no
+   elemento alvo NAO bastou - transform muda a APARENCIA mas nao o ESPACO
+   que o elemento reserva no layout, entao a paginacao continuava
+   considerando o tamanho ORIGINAL grande e gerando paginas extra em
+   branco mesmo com o conteudo "visualmente" cabendo. A tentativa
+   intermediaria de CLONAR o elemento (cloneNode) pra um wrapper com
+   tamanho reduzido introduziu um bug proprio e pior: no PDF gerado, o
+   texto aparecia quebrado letra por letra numa faixa vertical
+   estreitissima - suspeita de incompatibilidade entre o motor de
+   renderizacao de PDF do Chromium (CDP Page.printToPDF) e a propriedade
+   `zoom`/elementos clonados soltos fora da arvore original. Solucao final:
+   MOVER o elemento de verdade (nao clonar) pra dentro de um `<div>`
+   wrapper novo com `width`/`height` explicitos JA REDUZIDOS (tamanho
+   original x escala) + `overflow:hidden`, com `transform:scale()` só no
+   elemento movido dentro desse wrapper - o wrapper e quem reserva o
+   espaco correto no layout, o elemento por dentro dele so ajusta a
+   aparencia visual. No afterprint, o elemento volta pro lugar original
+   (parentNode.insertBefore no proximo irmao guardado antes, ou
+   appendChild se era o ultimo filho) e o wrapper e removido.
+
+Centralizacao: `margin: 0 auto` sozinho no elemento nao bastava (ele herda
+`display` do proprio Streamlit, nao e um bloco simples) - resolvido com
+`display:flex; justify-content:center` no proprio `<body>` durante a
+impressao (revertido no afterprint junto com o resto).
+
+Validado com Playwright gerando PDF DE VERDADE (nao só screenshot -
+`page.pdf(print_background=True, landscape=True)`) e contando paginas via
+PyMuPDF (fitz), numa pagina de teste isolada reproduzindo os mesmos
+elementos problematicos do caso real (grafico de barras com nomes longos +
+uma tabela grande simulando o resto da pagina, pra forcar o mesmo cenario
+de altura excessiva): confirmado 1 pagina so, conteudo cabendo nas duas
+dimensoes, centralizado, e titulo/estado revertendo certinho depois do
+afterprint.
+
+
+------------------------------------------------------------------------
+19) CLIENTES/FORNEC CNPJ - PAGINA TRAVANDO APOS IMPRIMIR (20/08/2026,
+    mesmo dia, depois de teste real do usuario)
+------------------------------------------------------------------------
+Com a correcao da secao 18 (1 pagina, centralizado), o usuario reportou
+mais 2 problemas: uma linha vertical fina "de trajeto" no meio do PDF
+(entre Top 10 Clientes e Top 10 Fornecedores) e, mais serio, a PAGINA
+FICAVA TRAVADA na area de impressao depois de salvar o PDF - nao voltava
+pro normal sozinha.
+
+CAUSA PROVAVEL DO TRAVAMENTO (confirmada em teste isolado): a versao
+anterior do JS (secao 18) tirava o elemento da arvore normal com
+`document.body.appendChild(wrapper)` - isso desloca o elemento pra FORA do
+container que o React do Streamlit gerencia. Testado especificamente: o
+Streamlit recria este componente (reexecuta a tag <script>) PERIODICAMENTE
+EM SEGUNDO PLANO, mesmo sem nenhuma interacao do usuario (confirmado
+simulando isso via Playwright, reexecutando o script no meio do processo
+de impressao) - e como a versao anterior guardava `tituloOriginal` numa
+VARIAVEL LOCAL da funcao anonima (que se perde a cada recriacao), uma nova
+execucao no meio do processo perdia essa referencia, deixando o titulo
+"preso" no nome do arquivo e (mais grave) o elemento tirado do lugar
+original sem ninguem com a referencia certa pra devolver.
+
+Corrigido com duas mudancas:
+  a) NAO tira mais o elemento da arvore - insere o wrapper no MESMO lugar/
+     pai onde o elemento ja estava (`paiOriginal.insertBefore(wrapper, el)`
+     seguido de `wrapper.appendChild(el)`), preservando ele "dentro" do
+     container que o React espera controlar.
+  b) TODO o estado que precisa sobreviver entre beforeprint/afterprint
+     (titulo original, wrapper, elementos escondidos) passou de variavel
+     local da funcao anonima pra propriedade de `window.parent` (persiste
+     entre recriacoes do componente) - e a funcao ganhou uma guarda no
+     inicio (`if (win._cfWrapper) return`) pra nao tentar montar tudo de
+     novo em cima do que ja esta la se for recriada com o processo ja em
+     andamento.
+  c) Duas redes de seguranca adicionadas: um timeout de 60s que reverte
+     tudo sozinho mesmo se o afterprint nunca disparar por algum motivo, e
+     um listener redundante via `matchMedia("print")` (mais consistente
+     que o evento afterprint em alguns navegadores/cenarios de "Salvar
+     como PDF" pelo dialogo do proprio SO).
+
+Validado com Playwright simulando EXATAMENTE o cenario suspeito: chama
+beforeprint, REEXECUTA o script da IIFE no meio (simulando o Streamlit
+recriando o componente), gera o PDF, so entao chama afterprint - confirmado
+que nao duplica o wrapper, o titulo volta certinho, o elemento volta pro
+lugar exato, e a sidebar/resto da pagina reaparecem normalmente.
+
+LINHA DE TRAJETO: nao foi possivel reproduzir localmente pra identificar a
+causa exata (tentado com a mesma estrutura de 2 graficos Plotly em
+st.columns(2), sem sucesso em reproduzir). Aplicada uma correcao
+defensiva mesmo assim - CSS removendo border/outline/box-shadow dos
+containers de coluna do Streamlit (`stHorizontalBlock`, `column`) durante
+a impressao, que nao deveria ter nenhum efeito colateral negativo (nao
+deveria haver borda nenhuma ali mesmo). PENDENTE: confirmar com o usuario
+se isso resolveu; se nao, vai precisar de investigacao mais direta (print
+do PDF pra comparar antes/depois, ou inspecionar o HTML gerado de verdade).
+
+
+------------------------------------------------------------------------
+20) CLIENTES/FORNEC CNPJ - IMPRESSAO REESCRITA DO ZERO: JANELA SEPARADA
+    (20/08/2026, mesmo dia, apos a correcao da secao 19 nao ter resolvido)
+------------------------------------------------------------------------
+A correcao da secao 19 (nao tirar o elemento da arvore, guardar estado em
+window, timeout de seguranca, matchMedia) NAO RESOLVEU - o usuario mandou
+print mostrando a pagina ainda travada, mostrando so o "IMPRIMIR" colapsado
+e nada mais, mesmo sem estar imprimindo. Toda a abordagem de "esconder/
+mover elementos dentro da propria pagina do Streamlit pra imprimir só uma
+parte dela" foi ABANDONADA - era fragil demais por natureza (qualquer
+interacao do React do Streamlit com aquela regiao do DOM podia conflitar
+com a manipulacao externa via JS), nao dava pra confiar por mais redes de
+seguranca que se empilhassem em cima.
+
+SOLUCAO NOVA (muito mais simples e robusta): o botao "Imprimir" agora abre
+uma JANELA/ABA SEPARADA do navegador, com uma pagina HTML autocontida
+gerada a partir do zero (titulo, cards de resumo, graficos) - nao mexe em
+NADA do DOM da pagina principal do Streamlit, entao e estruturalmente
+impossivel travar a pagina original (ela nunca e tocada).
+
+Detalhes tecnicos importantes (cada um encontrado por tentativa e erro,
+validado com Playwright de verdade antes de aceitar como resolvido):
+
+1. Os graficos sao gerados como HTML+JS via `fig.to_html(full_html=False,
+   include_plotlyjs="cdn"/False)` (so o PRIMEIRO grafico da pagina carrega
+   o Plotly via CDN, os demais reusam a mesma lib ja carregada) - tentativa
+   inicial de gerar imagens estaticas via kaleido (biblioteca ja presente
+   no ambiente) foi ABANDONADA porque kaleido travou/nao respondeu em mais
+   de 2 minutos numa chamada de teste simples - não confiavel o bastante
+   pra depender disso numa acao interativa do usuario.
+
+2. O botao usa `window.open()` DIRETO, NAO `window.parent.open()` - essa
+   foi a causa de a janela simplesmente nao abrir em varios testes (sem
+   erro nenhum, silenciosamente). A ativacao do clique do usuario ("user
+   activation") fica associada ao FRAME onde o evento ocorreu (o iframe do
+   componente Streamlit); chamar `.open()` no objeto `window.parent` conta
+   como uma chamada cross-frame que nao herda essa ativacao do mesmo jeito,
+   e o navegador bloqueia o popup por nao reconhecer como acao direta do
+   usuario. Chamando `window.open()` no PROPRIO iframe (que ja tem
+   `allow-popups` + `allow-popups-to-escape-sandbox` no atributo sandbox
+   que o Streamlit ja aplica por padrao) funciona e a janela escapa do
+   sandbox normalmente, virando uma aba/janela comum do navegador.
+
+3. O HTML dos graficos (gerado pelo Plotly) contem tags `</script>` dentro
+   dele. Ao embutir essa string inteira via `json.dumps()` dentro de OUTRO
+   bloco `<script>...</script>` (o do botao), o parser HTML do navegador
+   acha a PRIMEIRA ocorrencia de `</script>` (mesmo estando dentro de uma
+   string JSON) e fecha a tag ali, quebrando o resto do documento com erro
+   de sintaxe JS (visto no teste: "Invalid or unexpected token" /
+   "Unexpected identifier 'Streamlit'", fazendo a funcao imprimirJanela()
+   nem chegar a ser definida). Corrigido escapando manualmente depois do
+   json.dumps(): `.replace("</script>", "<\/script>")` (o `<\/script>`
+   continua sendo interpretado como a string normal pelo JS, so o PARSER
+   HTML deixa de reconhecer como fechamento de tag).
+
+4. Layout dos graficos: donut + Top 10 Clientes + Top 10 Fornecedores
+   empilhados verticalmente (like a ideia inicial) NAO cabiam numa pagina
+   so mesmo com escala calculada (confirmado gerando PDF real e contando
+   paginas com PyMuPDF/fitz - dava 2 paginas). Resolvido colocando os 3
+   lado a lado numa UNICA linha horizontal (aproveita bem a orientacao
+   paisagem) - largura total ~1080px dividida entre donut (260px fixo) e
+   os graficos de barra (o resto dividido entre quantos existirem). Margem
+   esquerda dos graficos de barra aumentada pra 230px (senão os nomes
+   longos das empresas ficavam cortados, so aparecia o numero do indice).
+
+Nome do arquivo ao salvar como PDF continua funcionando do mesmo jeito -
+`<title>{nome_arquivo_impressao}</title>` no HEAD da propria pagina nova
+(mais simples que a versao anterior, que precisava trocar o title
+temporariamente e reverter depois).
+
+Validado de ponta a ponta com Playwright reproduzindo a MESMA estrutura de
+dados do caso real do usuario (nomes de empresa longos, 10 linhas por
+grafico, ACASO BRINDES): popup abre, gera PDF real com `page.pdf()` e
+`print_background=True`, confirmado 1 pagina so, nomes completos visiveis,
+e a pagina principal do Streamlit permanece 100% intacta (sidebar visivel,
+title correto) depois de abrir a janela de impressao - a garantia mais
+importante desta correcao.
+
+
+------------------------------------------------------------------------
+21) SISTEMAS COMPILADOS EM .EXE (20/08/2026)
+------------------------------------------------------------------------
+Confirmado com o usuario ANTES de mexer: a arquitetura continua CENTRALIZADA
+(secao 6/10) - todo sistema roda sempre na maquina 192.168.1.250 (quem
+hospeda o launcher), nao no PC de quem clicou. O motivo de compilar em .exe
+e so que aquela maquina nao tem Python instalado (pendencia da secao 10b,
+que tentava resolver isso com um Python "embeddable" portatil) - agora nao
+precisa mais de Python nenhum la, so dos .exe.
+
+O QUE FOI COMPILADO (PyInstaller --onedir --console, no ambiente de dev
+desta maquina, que ja tinha PyInstaller 6.16.0 e todas as libs de cada
+sistema instaladas):
+  - CND MUNICIPAL\Gerar_CND.exe + MUNICÍPIOS GOIÁS\CND_Betha\CND_Betha.exe,
+    CND_Goiânia\, CND_ApdeGoiânia\, CND_Jatai\, CND_RioVerde\ (cada um na
+    sua PRÓPRIA subpasta onedir, nome da pasta = nome do exe - de propósito,
+    pra não misturar o _internal/ de builds diferentes numa pasta só, o que
+    arriscaria sobrescrever DLL de um com a de outro)
+  - PREFEITURA\DMS_Site.exe
+  - PREFEITURA\REST SITE\REST_Site.exe (a pasta "REST SITE" já era assim no
+    SISTEMAS dict do launcher, mesmo a fonte local ficando direto em
+    PREFEITURA\REST_Site.py sem essa subpasta - só o compilado ganhou essa
+    subpasta pra bater com o caminho que o launcher já esperava)
+  - SEFAZ AUTOMAÇÃO\SEFAZ_Site.exe (o motor inteiro - config/db/sessao/
+    portal/worker/sondar/certificado/log - fica embutido dentro do exe via
+    import estático normal, PyInstaller enxergou tudo sozinho)
+  - MALHA FINA SEFAZ\Malha_Fina.exe
+  Diagnostico_MalhaFina.py NÃO foi compilado (ferramenta de diagnóstico
+  manual solta, nunca esteve no SISTEMAS dict do launcher, fora do escopo).
+  Os 3 .exe que já existiam em EMITIR NOTAS (fora do launcher, não usados
+  por ele) foram mantidos como estavam, não mexidos.
+
+ONDE OS BUILDS FICARAM: cada build individual do PyInstaller fica em
+"SISTEMAS PARA LUATECH\...\dist\<nome>\" (saída padrão, uma pasta por
+sistema, dentro da respectiva pasta-fonte) E TAMBÉM já remontados na
+estrutura final em "SISTEMAS PARA LUATECH\COMPILADOS\", espelhando
+EXATAMENTE os caminhos relativos que o SISTEMAS dict do launcher espera
+dentro de PASTA_SISTEMAS (CND MUNICIPAL\, PREFEITURA\, SEFAZ AUTOMAÇÃO\,
+MALHA FINA SEFAZ\).
+
+DUAS IDEIAS TESTADAS E DESCARTADAS no meio da sessão, registradas aqui só
+pra não serem tentadas de novo sem motivo:
+  1. Um .spec único combinando os 10 scripts num COLLECT só (MERGE +
+     EXE(exclude_binaries=True) + um COLLECT compartilhando um _internal
+     só) - reduziria o total de ~2GB (pandas/numpy/selenium/playwright
+     duplicados 7-10x hoje). REJEITADA pelo usuário: dificulta demais
+     atualizar/recompilar um sistema sozinho sem mexer nos outros.
+  2. Consolidar os 10 builds (cada um continuando independente, só
+     reorganizados) numa pasta única "EXECUTÁVEIS\" fora da estrutura
+     CND MUNICIPAL\/PREFEITURA\/etc. Chegou a ser montada e o launcher
+     chegou a apontar pra ela (constante PASTA_EXECUTAVEIS), mas o usuário
+     percebeu que isso não resolvia o problema original (tamanho) - só
+     reorganizava sem economizar nada - e pediu pra reverter tudo pro
+     esquema anterior. REVERTIDO por completo: pasta EXECUTÁVEIS\ apagada,
+     PASTA_EXECUTAVEIS removida do launcher, SISTEMAS dict voltou a apontar
+     pra dentro de CND MUNICIPAL\/PREFEITURA\/etc.
+
+Decisão final (a que vale): 10 builds INDEPENDENTES, cada um com seu próprio
+_internal, organizados em COMPILADOS\ espelhando a estrutura de
+PASTA_SISTEMAS (igual documentado no início desta seção). O peso de ~2GB foi
+aceito conscientemente - só pesa assim no primeiro envio completo; uma
+atualização futura de UM sistema isolado só precisa levar a pasta daquele
+sistema (bem menor), não os 2GB de novo.
+
+PENDENTE: esta máquina de dev NÃO enxerga o drive D:\ (pasta de rede
+D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\EXECUSSÕES só existe mapeada na máquina do
+escritório) - o conteúdo de COMPILADOS\ precisa ser copiado manualmente
+(usuário vai levar via Área de Trabalho Remota) para DENTRO daquela pasta de
+rede, substituindo os .py antigos pelas pastas .exe novas. Enquanto isso não
+for feito, o launcher (já apontando pros .exe desde esta sessão) vai dar
+"Arquivo não encontrado" ao tentar rodar qualquer sistema.
+
+MUDANÇAS NO CÓDIGO:
+  - ASBEM_Exectar_Sistemas.py: SISTEMAS dict trocou toda extensão .py por
+    .exe; executar_sistema() parou de montar o comando como
+    [sys.executable, "-u", caminho] (não faz mais sentido, caminho já É o
+    executável) e passou a ser só [caminho]; import sys (que só servia pra
+    isso) foi removido por ficar sem uso.
+  - Gerar_CND.py (fonte, em SISTEMAS PARA LUATECH\CND MUNICIPAL\): SCRIPT_DIR
+    agora detecta frozen (getattr(sys, "frozen", False)) e usa
+    os.path.dirname(sys.executable) em vez de __file__ quando compilado -
+    __file__ dentro de um .exe do PyInstaller não aponta pra pasta real do
+    executável. E a chamada de cada município trocou de
+    subprocess.run([sys.executable, script, "--silent"]) (não funcionaria
+    mais - sys.executable seria o próprio Gerar_CND.exe) para
+    subprocess.run([caminho_do_exe_irmão, "--silent"]), montando o caminho
+    como MUNICÍPIOS GOIÁS\<nome>\<nome>.exe (padrão onedir, mesma pasta
+    MUNICÍPIOS GOIÁS\ de sempre, só que agora com .exe em vez de .py dentro
+    dela). Só entra nesse caminho quando frozen; rodando via "python
+    Gerar_CND.py" direto (dev) continua chamando os .py normalmente, sem
+    mudança de comportamento.
+  - Nenhum outro arquivo-fonte (DMS_Site.py, REST_Site.py, Malha_Fina.py,
+    SEFAZ AUTOMAÇÃO\*.py, CND_*.py dos municípios) precisou de mudança -
+    todos já usavam caminhos absolutos fixos (tipo C:\SEFAZ\..., C:\CND\...)
+    pra dados de saída, nunca dependiam de __file__/SCRIPT_DIR pra achar
+    outros arquivos além do que o Gerar_CND.py fazia.
+
+COMANDOS DE BUILD USADOS (pra reconstruir se algum sistema for alterado):
+  Família CND (Gerar_CND.py fica sem flag nenhuma extra, é leve):
+    python -m PyInstaller --noconfirm --onedir --console Gerar_CND.py
+  Cada CND_*.py (dentro de MUNICÍPIOS GOIÁS\) e DMS_Site.py/REST_Site.py -
+  usam selenium+undetected_chromedriver, cujos submódulos o PyInstaller não
+  enxerga sozinho (mesmo motivo já documentado no .spec de
+  Emissao_Portal_Nfse.exe, EMITIR NOTAS\):
+    python -m PyInstaller --noconfirm --onedir --console ^
+      --collect-submodules selenium ^
+      --hidden-import selenium.webdriver.chrome.webdriver ^
+      --hidden-import selenium.webdriver.chrome.service ^
+      --hidden-import selenium.webdriver.chrome.options ^
+      --collect-all undetected_chromedriver ^
+      --collect-all pdfminer ^        (só nos CND_*.py, que usam pdfminer)
+      --collect-all reportlab ^       (só no REST_Site.py)
+      --hidden-import PIL._tkinter_finder ^  (só no REST_Site.py)
+      NomeDoArquivo.py
+  Malha_Fina.py e SEFAZ AUTOMAÇÃO\SEFAZ_Site.py - usam Playwright:
+    python -m PyInstaller --noconfirm --onedir --console --collect-all playwright NomeDoArquivo.py
+
+VALIDAÇÃO FEITA (só smoke test - nenhum fluxo completo de login/automação
+real foi validado, isso só dá pra confirmar rodando na máquina de destino):
+cada um dos 10 .exe (Gerar_CND + 5 municípios + DMS + REST + Malha Fina +
+SEFAZ Site) foi executado isoladamente por alguns segundos, sem nenhum
+ModuleNotFoundError/crash de import, e ficou "vivo" no Gerenciador de
+Tarefas até ser encerrado manualmente (esperado - todos abrem uma janela
+tkinter pedindo interação humana logo no início, então "continuar rodando
+esperando" É o resultado correto de um teste sem interação). SEFAZ_Site.exe
+demorou mais no primeiro boot (~10-15s pra aparecer no Gerenciador de
+Tarefas) - suspeita de varredura de antivírus nos arquivos grandes que o
+Playwright empacota (inclusive um runtime Node.js embutido); não travou,
+só foi mais lento a primeira vez.
+
+PENDÊNCIAS QUE JÁ EXISTIAM E NÃO MUDAM COM A COMPILAÇÃO (compilar o script
+em .exe não elimina dependência nenhuma de binário externo que ele já
+tinha):
+  - undetected_chromedriver (Gerar CND e os 5 municípios, DMS Site, REST
+    Site) continua exigindo o Google Chrome de verdade instalado na máquina
+    de destino (192.168.1.250) - mesma pendência da seção 10b, não
+    resolvida por este trabalho. O ChromeDriver em si o
+    undetected_chromedriver baixa sozinho na hora (não precisa vir junto no
+    .exe).
+  - Playwright (Malha_Fina.exe, SEFAZ_Site.exe) não roda com só o pacote
+    Python embutido no .exe - o Chromium que ele usa fica numa pasta cache
+    SEPARADA (nesta máquina de dev: C:\Users\luann\AppData\Local\
+    ms-playwright\, pastas chromium-1187/chromium-1200/etc), baixada em
+    algum momento por "playwright install chromium" - isso NUNCA foi
+    empacotado dentro do .exe (ficaria enorme, e --collect-all playwright
+    só pega o pacote Python, não esses binários). Na máquina de destino,
+    sem Python pra rodar esse comando, a única forma de ter o Chromium lá é
+    COPIAR manualmente a pasta %LOCALAPPDATA%\ms-playwright inteira desta
+    máquina de dev (ou de qualquer máquina com a MESMA versão do pacote
+    playwright instalada) para dentro do %LOCALAPPDATA%\ms-playwright da
+    máquina 192.168.1.250 (ou setar a variável de ambiente
+    PLAYWRIGHT_BROWSERS_PATH apontando pra onde essa pasta foi colocada,
+    antes de o Streamlit/launcher subir). PENDENTE: nunca confirmado se
+    isso foi feito na máquina de destino - sem isso, Malha_Fina.exe e
+    SEFAZ_Site.exe vão falhar ao tentar abrir o navegador (playwright.
+    chromium.launch() não acha o executável).

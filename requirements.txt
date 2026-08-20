@@ -2,6 +2,7 @@ streamlit==1.41.0
 pandas
 numpy
 openpyxl
+xlrd
 streamlit-aggrid==0.3.4
 requests
 gspread

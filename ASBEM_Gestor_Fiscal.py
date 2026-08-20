@@ -6,14 +6,16 @@
 import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
-from io import BytesIO
+from io import BytesIO, StringIO
 import requests
 import time
 import os
+import re
 import base64
 import json
 from pathlib import Path
 from datetime import date
+from openpyxl.worksheet.datavalidation import DataValidation
 
 # Tkinter só existe em ambientes com display (execução local). No Streamlit Cloud não está disponível.
 try:
@@ -1032,7 +1034,8 @@ st.sidebar.markdown("<hr style='margin: 8px 0;'>", unsafe_allow_html=True)
 # Define as páginas disponíveis por área
 if st.session_state["menu_area"] == "FISCAL":
     paginas_disponiveis = ["EMPRESAS", "SIMPLES NACIONAL", "REINF", "DCTF WEB",
-                           "DMS", "SERVIÇOS TOMADOS", "SEFAZ", "LEITURA XML DMS", "LEITURA XML REST","SEFAZ COMPARAÇÃO"]
+                           "DMS", "SERVIÇOS TOMADOS", "SEFAZ", "LEITURA XML DMS", "LEITURA XML REST",
+                           "SEFAZ COMPARAÇÃO", "CLIENTES/FORNEC CNPJ"]
 
 elif st.session_state["menu_area"] == "PARALEGAL":
     paginas_disponiveis = ["DASHBOARD", "EMPRESAS", "CND MUNICIPAL", "SEM ACESSO"]
@@ -1060,21 +1063,165 @@ if st.session_state["pagina_atual"] != pagina:
 # PÁGINAS
 # ============================================================================
 
+# Apps Script PRÓPRIO de EMPRESAS (projeto e URL separados do APPS_SCRIPT_URL usado
+# para CERTIFICADOS/EMAIL/MENSAGEM) — grava célula a célula na aba GERAL, localizando
+# a linha pelo CNPJ ou usando a próxima linha livre para empresa nova. Nunca reescreve
+# a aba inteira. Ver apps_script_empresas.gs (guardado local, fora do Git) para o
+# código-fonte e o passo a passo de implantação.
+APPS_SCRIPT_EMPRESAS_URL = "https://script.google.com/macros/s/AKfycby3bPtkhbLb4sXE3qfwU0rXLS4mze2PYpFaHvrdYJ9eGX7kJiKjJR-zvxCt2MCPXSG4/exec"
+
+REGIMES_PADRAO = [
+    "SIMPLES NACIONAL", "LUCRO PRESUMIDO", "LUCRO REAL", "MEI",
+    "NÃO OPTANTE", "NÃO OPTANTE SN", "EM ANÁLISE",
+]
+
+COLUNAS_LOTE_EMPRESAS = ["Razão Social", "CNPJ", "Código", "Regime", "Município", "Estado"]
+
+
+def _cnpj_digitos(valor):
+    """Extrai os 14 dígitos do CNPJ, tratando o caso da planilha guardar o valor como
+    número (perde o zero à esquerda). Importante: passar por int(float(...)) primeiro —
+    limpar direto a string "4291528000118.0" viraria "42915280001180" (o ".0" some e
+    sobra um dígito fantasma no FINAL, deslocando o número). Convertendo pra int antes,
+    o zero à esquerda que faltava é reposto no lugar certo pelo zfill."""
+    try:
+        digitos = re.sub(r"\D", "", str(int(float(valor))))
+    except (TypeError, ValueError):
+        digitos = re.sub(r"\D", "", str(valor))
+    if len(digitos) == 15:  # CNPJ já vinha com 14 dígitos + artefato do ".0"
+        digitos = digitos[:14]
+    return digitos.zfill(14)
+
+
+def _formata_cnpj(valor):
+    """Formata CNPJ vindo da planilha como 00.000.000/0000-00."""
+    digitos = _cnpj_digitos(valor)
+    return f"{digitos[:2]}.{digitos[2:5]}.{digitos[5:8]}/{digitos[8:12]}-{digitos[12:14]}"
+
+
+def _texto(valor):
+    """Converte célula da planilha para string, tratando NaN (pandas) como vazio."""
+    if pd.isna(valor):
+        return ""
+    texto = str(valor).strip()
+    return "" if texto.lower() == "nan" else texto
+
+
+def _enviar_empresas_apps_script(payload_empresas: dict):
+    """POSTa edições/inclusões de empresas para o Apps Script, que grava célula a
+    célula na aba GERAL (localiza a linha pelo CNPJ ou usa a próxima linha livre
+    para empresa nova — nunca mexe em estrutura ou em outras colunas/linhas)."""
+    if not APPS_SCRIPT_EMPRESAS_URL:
+        return False, "APPS_SCRIPT_EMPRESAS_URL ainda não configurada (ver apps_script_empresas.gs)."
+    try:
+        resp = requests.post(APPS_SCRIPT_EMPRESAS_URL, json={"empresas": payload_empresas}, timeout=30)
+        resp.raise_for_status()
+        corpo = resp.json()
+        if corpo.get("status") == "ok":
+            return True, ""
+        return False, corpo.get("message", "erro desconhecido")
+    except Exception as e:
+        return False, str(e)
+
+
+def _gerar_modelo_empresas_excel() -> bytes:
+    """Gera o .xlsx modelo para cadastro em lote: uma linha de exemplo na aba
+    'Empresas' (com dropdown de validação no Regime, apontando pra aba
+    'Regimes válidos') pra evitar digitação livre errada. Sem coluna Matriz/Filial
+    — a planilha GERAL já tem fórmula própria que identifica isso sozinha."""
+    modelo = pd.DataFrame([{
+        "Razão Social": "EXEMPLO LTDA",
+        "CNPJ": "00.000.000/0001-00",
+        "Código": "1234",
+        "Regime": REGIMES_PADRAO[0],
+        "Município": "GOIÂNIA",
+        "Estado": "GO",
+    }], columns=COLUNAS_LOTE_EMPRESAS)
+
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        modelo.to_excel(writer, index=False, sheet_name="Empresas")
+        pd.DataFrame({"Regimes válidos": REGIMES_PADRAO}).to_excel(writer, index=False, sheet_name="Regimes válidos")
+
+        ws_empresas = writer.sheets["Empresas"]
+        qtd_regimes = len(REGIMES_PADRAO)
+        validacao_regime = DataValidation(
+            type="list",
+            formula1=f"'Regimes válidos'!$A$2:$A${qtd_regimes + 1}",
+            allow_blank=True,
+        )
+        validacao_regime.error = "Escolha um Regime da lista (aba 'Regimes válidos')."
+        validacao_regime.errorTitle = "Regime inválido"
+        validacao_regime.showErrorMessage = True
+        ws_empresas.add_data_validation(validacao_regime)
+        col_regime = COLUNAS_LOTE_EMPRESAS.index("Regime") + 1  # 1-based
+        col_letra = ws_empresas.cell(row=1, column=col_regime).column_letter
+        validacao_regime.add(f"{col_letra}2:{col_letra}1000")
+
+    return buffer.getvalue()
+
+
+def _validar_lote_empresas(df_lote: pd.DataFrame, cnpjs_existentes: set) -> pd.DataFrame:
+    """Valida cada linha do arquivo enviado: Razão Social obrigatória, CNPJ válido
+    e não duplicado (nem contra a planilha, nem dentro do próprio arquivo) e Regime
+    dentro de REGIMES_PADRAO (outras telas comparam esse campo por string exata).
+    Mesmo com o dropdown no Excel, valida de novo aqui porque um CSV ou cópia/cola
+    pode ter driblado a validação da planilha."""
+    cnpjs_no_lote = set()
+    linhas = []
+    for _, linha in df_lote.iterrows():
+        razao = _texto(linha.get("Razão Social"))
+        cnpj_bruto = _texto(linha.get("CNPJ"))
+        cnpj_bruto_digitos = re.sub(r"\D", "", cnpj_bruto)
+        cnpj_norm = _cnpj_digitos(cnpj_bruto) if cnpj_bruto_digitos else ""
+        codigo = _texto(linha.get("Código"))
+        regime = _texto(linha.get("Regime")).upper()
+        municipio = _texto(linha.get("Município")).upper()
+        estado = _texto(linha.get("Estado")).upper()[:2]
+
+        erro = None
+        if not razao:
+            erro = "Razão Social vazia"
+        elif len(cnpj_bruto_digitos) < 11:
+            erro = "CNPJ inválido"
+        elif cnpj_norm in cnpjs_existentes:
+            erro = "CNPJ já cadastrado na planilha"
+        elif cnpj_norm in cnpjs_no_lote:
+            erro = "CNPJ duplicado no próprio arquivo"
+        elif regime and regime not in REGIMES_PADRAO:
+            erro = "Regime inválido (veja a aba 'Regimes válidos' do modelo)"
+
+        if not erro:
+            cnpjs_no_lote.add(cnpj_norm)
+
+        linhas.append({
+            "Razão Social": razao,
+            "CNPJ": _formata_cnpj(cnpj_norm) if cnpj_norm else cnpj_bruto,
+            "Código": codigo,
+            "Regime": regime,
+            "Município": municipio,
+            "Estado": estado,
+            "_cnpj_digitos": cnpj_norm,
+            "Status": "✅ OK" if not erro else f"❌ {erro}",
+        })
+    return pd.DataFrame(linhas)
+
+
 def pagina_empresas():
     st.empty()
     df = le_planilha_google(GOOGLE_SHEET_URL, SHEET_EMPRESAS)
     if df is None:
         return
-    
+
     competencia_raw = df["PERÍODO DE COMPETÊNCIA"].iloc[0] if "PERÍODO DE COMPETÊNCIA" in df.columns else ""
     competencia = pd.to_datetime(competencia_raw, errors='coerce').strftime("%m/%Y") if competencia_raw else ""
-    
+
     if "Situação" in df.columns:
         df_empresas = df[df["Situação"].astype(str).str.upper() == "ATIVA"]
     else:
         st.error("Coluna 'Situação' não encontrada.")
         return
-    
+
     colunas = ["Código", "Razão Social", "CNPJ", "Regime", "Município", "Estado", "Matriz / Filial", "Situação"]
     df_empresas = df_empresas[[c for c in colunas if c in df_empresas.columns]]
     df_empresas = _sanitiza_df(df_empresas)
@@ -1108,14 +1255,236 @@ def pagina_empresas():
     with st.container():
         df_empresas = _sanitiza_df(df_empresas)
         exibe_aggrid(df_empresas, height=400, grid_key="grid_empresas")
-    
+
     output = BytesIO()
     df_empresas.to_excel(output, index=False)
     st.download_button("Baixar Excel", data=output.getvalue(), file_name="empresas.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+    # ============================================================================
+    # EDITAR / CADASTRAR / INCLUIR EM LOTE — grava direto na planilha GERAL via
+    # Apps Script (célula a célula, nunca reescreve a aba). Movido de
+    # ASBEM_Exectar_Sistemas.py (03/08/2026) pra aparecer aqui, único ponto de
+    # entrada usado pelos módulos FISCAL/PARALEGAL/CONTÁBIL.
+    # ============================================================================
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.caption(
+        "As alterações abaixo são gravadas direto na planilha GERAL — célula a célula, "
+        "sem apagar nenhum outro dado."
+    )
 
-import re  # adicione no topo do arquivo se ainda não tiver
+    df_edicao = df.copy()
+    df_edicao["_cnpj_digitos"] = df_edicao["CNPJ"].apply(_cnpj_digitos) if "CNPJ" in df_edicao.columns else ""
+    df_edicao["_rotulo"] = df_edicao.apply(
+        lambda r: f"{_texto(r.get('Razão Social')) or '(sem razão social)'} — {_formata_cnpj(r.get('CNPJ'))}",
+        axis=1,
+    )
+
+    col_editar, col_cadastrar = st.columns(2)
+
+    # ── Editar empresa existente (Situação, Município, Estado) ────────────────
+    with col_editar:
+        with st.expander("✏️ Editar empresa existente", expanded=False):
+            if df_edicao.empty:
+                st.info("Nenhuma empresa cadastrada.")
+            else:
+                escolha = st.selectbox("Empresa", df_edicao["_rotulo"].tolist(), key="sel_editar_empresa_gf")
+                linha = df_edicao[df_edicao["_rotulo"] == escolha].iloc[0]
+
+                situacoes = ["ATIVA", "INATIVA", "EMPRESA NOVA"]
+                # Situação pode vir composta da vez passada (ex.: "INATIVA 06/2026").
+                # Testa igualdade exata primeiro (cobre "EMPRESA NOVA", que também tem
+                # espaço) e só separa o período se sobrar prefixo "INATIVA ".
+                situacao_bruta = _texto(linha.get("Situação")).upper().strip()
+                periodo_atual = ""
+                if situacao_bruta in situacoes:
+                    situacao_atual = situacao_bruta
+                else:
+                    partes_situacao = situacao_bruta.split(None, 1)
+                    candidato = partes_situacao[0] if partes_situacao else ""
+                    if candidato == "INATIVA" and len(partes_situacao) > 1:
+                        situacao_atual = "INATIVA"
+                        periodo_atual = partes_situacao[1].strip()
+                    else:
+                        situacao_atual = candidato
+                idx_situacao = situacoes.index(situacao_atual) if situacao_atual in situacoes else 0
+
+                opcoes_regime = REGIMES_PADRAO.copy()
+                regime_atual = _texto(linha.get("Regime")).upper()
+                if regime_atual and regime_atual not in opcoes_regime:
+                    opcoes_regime.append(regime_atual)
+                idx_regime = opcoes_regime.index(regime_atual) if regime_atual in opcoes_regime else 0
+
+                with st.form("form_editar_empresa_gf"):
+                    nova_situacao = st.selectbox("Situação", situacoes, index=idx_situacao)
+                    novo_periodo = st.text_input(
+                        "Período (mm/aaaa) — obrigatório se Situação = INATIVA",
+                        value=periodo_atual, placeholder="06/2026",
+                    )
+                    novo_regime = st.selectbox("Regime Tributário", opcoes_regime, index=idx_regime)
+                    novo_municipio = st.text_input("Município", value=_texto(linha.get("Município")))
+                    novo_estado = st.text_input("Estado (UF)", value=_texto(linha.get("Estado")), max_chars=2)
+                    salvar = st.form_submit_button("💾 Salvar alterações", type="primary")
+
+                if salvar:
+                    valor_situacao = nova_situacao
+                    situacao_valida = True
+                    if nova_situacao == "INATIVA":
+                        periodo_limpo = novo_periodo.strip()
+                        if not re.match(r"^(0[1-9]|1[0-2])/\d{4}$", periodo_limpo):
+                            st.error(
+                                "Pra marcar como INATIVA, preencha o Período no formato "
+                                "mm/aaaa (ex: 06/2026)."
+                            )
+                            situacao_valida = False
+                        else:
+                            # Fica gravado na própria célula Situação, ex.: "INATIVA 06/2026"
+                            # — como não bate mais com "ATIVA", a empresa some das telas/robôs
+                            # que filtram por Situação == ATIVA, e o período fica registrado ali.
+                            valor_situacao = f"INATIVA {periodo_limpo}"
+
+                    if situacao_valida:
+                        payload = {
+                            "edicoes": [{
+                                "cnpj": linha["_cnpj_digitos"],
+                                "campos": {
+                                    "Situação": valor_situacao,
+                                    "Regime": novo_regime,
+                                    "Município": novo_municipio.strip().upper(),
+                                    "Estado": novo_estado.strip().upper(),
+                                },
+                            }]
+                        }
+                        ok, erro = _enviar_empresas_apps_script(payload)
+                        if ok:
+                            st.toast("Empresa atualizada na planilha.", icon="✅")
+                            le_planilha_google.clear()
+                            st.rerun()
+                        else:
+                            st.error(f"Erro ao salvar na planilha: {erro}")
+
+    # ── Cadastrar nova empresa ─────────────────────────────────────────────────
+    with col_cadastrar:
+        with st.expander("➕ Cadastrar nova empresa", expanded=False):
+            with st.form("form_nova_empresa_gf"):
+                razao = st.text_input("Razão Social")
+                cnpj_novo = st.text_input("CNPJ")
+                codigo = st.text_input("Código")
+                regime = st.text_input("Regime")
+                municipio = st.text_input("Município")
+                estado = st.text_input("Estado (UF)", max_chars=2)
+                cadastrar = st.form_submit_button("➕ Cadastrar", type="primary")
+
+            if cadastrar:
+                cnpj_bruto_digitos = re.sub(r"\D", "", cnpj_novo)
+                cnpj_digitos = _cnpj_digitos(cnpj_novo)
+                if not razao.strip():
+                    st.error("Informe a Razão Social.")
+                elif len(cnpj_bruto_digitos) < 11:
+                    st.error("CNPJ inválido.")
+                elif cnpj_digitos in set(df_edicao["_cnpj_digitos"]):
+                    st.error("Já existe uma empresa cadastrada com esse CNPJ.")
+                else:
+                    payload = {
+                        "novas": [{
+                            "campos": {
+                                "Razão Social": razao.strip(),
+                                "CNPJ": cnpj_digitos,
+                                "Código": codigo.strip(),
+                                "Regime": regime.strip(),
+                                "Município": municipio.strip().upper(),
+                                "Estado": estado.strip().upper(),
+                                "Situação": "EMPRESA NOVA",
+                            }
+                        }]
+                    }
+                    ok, erro = _enviar_empresas_apps_script(payload)
+                    if ok:
+                        st.toast(
+                            "Empresa cadastrada como EMPRESA NOVA. Complete o restante dos "
+                            "dados nesta tela depois.", icon="✅"
+                        )
+                        le_planilha_google.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"Erro ao cadastrar na planilha: {erro}")
+
+    # ── Incluir empresas em lote ───────────────────────────────────────────────
+    with st.expander("📦 Incluir empresas em lote", expanded=False):
+        st.caption(
+            "1) Baixe o modelo e preencha uma linha por empresa. 2) Envie o arquivo "
+            "preenchido aqui embaixo pra conferir. 3) Confirme o cadastro. Cada empresa "
+            "entra como EMPRESA NOVA (mesmo comportamento do cadastro individual acima) "
+            "— complete o restante dos dados depois."
+        )
+
+        st.download_button(
+            "📥 Baixar modelo Excel",
+            data=_gerar_modelo_empresas_excel(),
+            file_name="modelo_empresas_lote.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        arquivo_lote = st.file_uploader(
+            "Enviar planilha preenchida (.xlsx)", type=["xlsx"], key="upload_lote_empresas_gf"
+        )
+
+        if arquivo_lote is not None:
+            try:
+                df_lote_bruto = pd.read_excel(arquivo_lote, sheet_name="Empresas", engine="openpyxl")
+            except Exception:
+                arquivo_lote.seek(0)
+                df_lote_bruto = pd.read_excel(arquivo_lote, engine="openpyxl")
+            df_lote_bruto.columns = df_lote_bruto.columns.str.strip()
+
+            colunas_faltando = [c for c in ["Razão Social", "CNPJ"] if c not in df_lote_bruto.columns]
+            if colunas_faltando:
+                st.error(f"Arquivo fora do modelo — faltam as colunas: {', '.join(colunas_faltando)}.")
+            elif df_lote_bruto.empty:
+                st.info("O arquivo enviado não tem nenhuma linha.")
+            else:
+                df_validado = _validar_lote_empresas(df_lote_bruto, set(df_edicao["_cnpj_digitos"]))
+                st.dataframe(
+                    df_validado.drop(columns=["_cnpj_digitos"]),
+                    use_container_width=True, hide_index=True,
+                )
+
+                validas = df_validado[df_validado["Status"] == "✅ OK"]
+                qtd_invalidas = len(df_validado) - len(validas)
+                if qtd_invalidas:
+                    st.warning(f"{qtd_invalidas} linha(s) com erro não serão cadastradas.")
+
+                if validas.empty:
+                    st.info("Nenhuma linha válida para cadastrar.")
+                else:
+                    if st.button(
+                        f"📤 Cadastrar {len(validas)} empresa(s) em lote",
+                        type="primary", key="btn_confirmar_lote_gf",
+                    ):
+                        payload = {
+                            "novas": [{
+                                "campos": {
+                                    "Razão Social": row["Razão Social"],
+                                    "CNPJ": row["_cnpj_digitos"],
+                                    "Código": row["Código"],
+                                    "Regime": row["Regime"],
+                                    "Município": row["Município"],
+                                    "Estado": row["Estado"],
+                                    "Situação": "EMPRESA NOVA",
+                                }
+                            } for _, row in validas.iterrows()]
+                        }
+                        ok, erro = _enviar_empresas_apps_script(payload)
+                        if ok:
+                            st.toast(
+                                f"{len(validas)} empresa(s) cadastradas como EMPRESA NOVA. "
+                                "Complete o restante dos dados depois.", icon="✅"
+                            )
+                            le_planilha_google.clear()
+                            st.rerun()
+                        else:
+                            st.error(f"Erro ao cadastrar em lote: {erro}")
+
 
 # ── helper CNPJ ─────────────────────────────────────────────────────────────
 def _normaliza_cnpj(val):
@@ -3674,6 +4043,616 @@ def pagina_sefaz_comparacao():
         st.success("Nenhuma divergência encontrada entre as colunas!")
 
 # ============================================================================
+# CLIENTES/FORNEC CNPJ — upload das planilhas do ERP (só leitura, nada é
+# gravado na GERAL nem em nenhuma outra aba; cruza só pelo Código pra filtrar
+# ATIVAS e trazer a Razão Social da empresa da ASBEM)
+# ============================================================================
+
+# Posição das colunas na planilha exportada pelo ERP DEPOIS de tirar a
+# mesclagem de células (índice 0-based == coluna do Excel: A=0, C=2, E=4,
+# H=7, X=23, Z=25, AB=27). A linha 4 (índice 3, 0-based) é o cabeçalho e traz
+# "fornecedor" ou "cliente" na mesma posição — é o que diferencia os dois
+# relatórios (Entradas x Saídas).
+COLS_CLI_FORNEC = {
+    "codigo": 0, "nome": 2, "cnpj": 4, "especie": 7,
+    "valor": 23, "base_icms": 25, "valor_icms": 27,
+}
+LINHA_CABECALHO_CLI_FORNEC = 3
+
+# Apps Script PRÓPRIO de CLIENTES/FORNEC CNPJ (projeto/URL isolados dos
+# demais, ver apps_script_cliente_fornecedor.gs) — grava o resultado já
+# cruzado com a GERAL nas abas DADOS/DADOS_META, sempre reescrevendo por
+# inteiro. Diferente da GERAL, isso é seguro aqui porque as duas abas só
+# existem pra este recurso, geradas 100% a partir daqui — nenhum outro
+# sistema lê ou escreve nelas. Preencher depois de publicar o Apps Script.
+APPS_SCRIPT_CLI_FORNEC_URL = "https://script.google.com/macros/s/AKfycbzf20V3NuHzs6G3UCkphzso6LUuynmcdL2Z20OHl-qLtYqgLBC_Xv49nQeVkw0FyTY9/exec"
+
+SHEET_CLI_FORNEC_DADOS = "DADOS"
+SHEET_CLI_FORNEC_META = "DADOS_META"
+
+
+def _enviar_cli_fornec_apps_script(df_dados: pd.DataFrame, nome_arquivo_fornecedor, nome_arquivo_cliente):
+    """POSTa o resultado já cruzado com a GERAL pro Apps Script isolado, que
+    reescreve a aba DADOS (+ DADOS_META) por inteiro. Fire-and-forget: se
+    falhar, quem chamou só avisa o usuário — os dados continuam valendo na
+    sessão do navegador via session_state independente disso."""
+    if not APPS_SCRIPT_CLI_FORNEC_URL:
+        return False, "APPS_SCRIPT_CLI_FORNEC_URL ainda não configurada (ver apps_script_cliente_fornecedor.gs)."
+    import datetime as _dt_mod
+    df_envio = df_dados.astype(object).where(df_dados.notna(), "")
+    payload = {
+        "cli_fornec": {
+            "linhas": df_envio.to_dict(orient="records"),
+            "arquivo_fornecedor": nome_arquivo_fornecedor or "",
+            "arquivo_cliente": nome_arquivo_cliente or "",
+            "atualizado_em": _dt_mod.datetime.now().strftime("%d/%m/%Y %H:%M"),
+        }
+    }
+    try:
+        resp = requests.post(APPS_SCRIPT_CLI_FORNEC_URL, json=payload, timeout=60)
+        resp.raise_for_status()
+        corpo = resp.json()
+        if corpo.get("status") == "ok":
+            return True, ""
+        return False, corpo.get("message", "erro desconhecido")
+    except Exception as e:
+        return False, str(e)
+
+
+def _carrega_cli_fornec_da_planilha():
+    """Lê os dados salvos nas abas DADOS/DADOS_META — só leitura, mesmo
+    export público usado em le_planilha_google(). Retorna (df_dados, meta)
+    ou (None, None) se a aba ainda não tiver nada salvo."""
+    try:
+        resp = requests.get(GOOGLE_SHEET_URL)
+        resp.raise_for_status()
+        conteudo = resp.content
+        df = pd.read_excel(BytesIO(conteudo), sheet_name=SHEET_CLI_FORNEC_DADOS, engine="openpyxl")
+        if df.empty:
+            return None, None
+        df.columns = df.columns.str.strip()
+        # o export?format=xlsx do Google Sheets reconverte texto-que-parece-
+        # número de volta pra número (mesma causa raiz do zero à esquerda do
+        # CNPJ sumindo, documentada na seção 5 do CONTEXTO_SISTEMA.txt) —
+        # reconstrói aqui do mesmo jeito que o resto do sistema já faz pra
+        # qualquer leitura vinda da GERAL, não é algo que dá pra evitar no
+        # lado da gravação (Apps Script)
+        if "CNPJ" in df.columns:
+            df["CNPJ"] = df["CNPJ"].apply(_cnpj_digitos)
+        if "Código" in df.columns:
+            df["Código"] = df["Código"].apply(lambda v: str(int(v)) if pd.notna(v) else "")
+        try:
+            df_meta = pd.read_excel(BytesIO(conteudo), sheet_name=SHEET_CLI_FORNEC_META, engine="openpyxl")
+            meta = dict(zip(df_meta["Campo"], df_meta["Valor"]))
+        except Exception:
+            meta = {}
+        return df, meta
+    except Exception:
+        return None, None
+
+
+def _corrige_offset_planilha_xls(conteudo: bytes):
+    """Alguns relatórios exportados do ERP contábil vêm com o offset do
+    BOUNDSHEET apontando pro lugar errado dentro do stream BIFF (bug da
+    ferramenta que gerou o .xls, não do xlrd/olefile — confirmado reextraindo
+    o stream OLE manualmente e comparando byte a byte, ver CONTEXTO_SISTEMA.txt
+    seção 11). Isso faz o xlrd/pandas errar com 'Expected BOF record'. Quando
+    acontece, localiza o BOF de verdade da(s) planilha(s) procurando a
+    assinatura de registro Worksheet BOF (0x0809, dt=0x0010 = worksheet) no
+    resto do stream e corrige o offset antes de continuar o parse. Só corrige
+    quando dá pra casar 1-pra-1 sem ambiguidade (nº de BOFs encontrados ==
+    nº de planilhas com offset inválido); senão desiste e deixa o erro subir."""
+    import struct
+    from xlrd.book import Book, XL_WORKBOOK_GLOBALS
+
+    bk = Book()
+    bk.biff2_8_load(file_contents=conteudo, logfile=StringIO(), verbosity=0,
+                     use_mmap=False, formatting_info=False, on_demand=False,
+                     ragged_rows=False, ignore_workbook_corruption=True)
+    bk.biff_version = bk.getbof(XL_WORKBOOK_GLOBALS)
+    bk.parse_globals()
+    bk._sheet_list = [None for _ in bk._sheet_names]
+
+    quebrados = [i for i, posn in enumerate(bk._sh_abs_posn) if bk.mem[posn:posn + 2] != b"\x09\x08"]
+    if quebrados:
+        candidatos = []
+        janela = bk.mem[bk.base: bk.base + bk.stream_len]
+        pos = janela.find(b"\x09\x08")
+        while pos != -1:
+            if pos + 8 <= len(janela):
+                length = struct.unpack_from("<H", janela, pos + 2)[0]
+                if length >= 6:
+                    vers, dt = struct.unpack_from("<HH", janela, pos + 4)
+                    if dt == 0x0010 and vers in (0x0500, 0x0600):
+                        candidatos.append(pos + bk.base)
+            pos = janela.find(b"\x09\x08", pos + 1)
+        if len(candidatos) != len(quebrados):
+            raise ValueError(
+                f"offset do BOUNDSHEET corrompido e não foi possível corrigir sem ambiguidade "
+                f"({len(quebrados)} planilha(s) com offset ruim, {len(candidatos)} candidato(s) encontrado(s))"
+            )
+        for i, novo_offset in zip(quebrados, candidatos):
+            bk._sh_abs_posn[i] = novo_offset
+
+    bk.get_sheets()
+    bk.nsheets = len(bk._sheet_list)
+    bk.release_resources()
+    return bk
+
+
+def _xlrd_sheet_para_dataframe(sh):
+    linhas = [[sh.cell_value(r, c) for c in range(sh.ncols)] for r in range(sh.nrows)]
+    return pd.DataFrame(linhas)
+
+
+def _le_planilha_cliente_fornec(arquivo, tipo_esperado):
+    """Lê a planilha de Clientes/Fornecedores enviada pelo usuário. Ignora
+    cabeçalho/formatação e pega direto pelas posições de coluna combinadas
+    (ver COLS_CLI_FORNEC) porque a mesclagem do arquivo original faz metade
+    das colunas ficar vazia. Retorna (DataFrame, None) ou (None, mensagem_erro)."""
+    nome_arquivo = arquivo.name.lower()
+    try:
+        if nome_arquivo.endswith(".xlsx"):
+            df_raw = pd.read_excel(arquivo, header=None, engine="openpyxl")
+        else:
+            conteudo = arquivo.getvalue()
+            try:
+                df_raw = pd.read_excel(BytesIO(conteudo), header=None, engine="xlrd")
+            except Exception:
+                # relatório do ERP às vezes vem com o offset do BOUNDSHEET
+                # corrompido — tenta corrigir antes de desistir (ver
+                # _corrige_offset_planilha_xls)
+                bk = _corrige_offset_planilha_xls(conteudo)
+                df_raw = _xlrd_sheet_para_dataframe(bk.sheet_by_index(0))
+    except Exception as e:
+        return None, (
+            f"Não consegui abrir **{arquivo.name}** automaticamente ({e}). "
+            "Abra o arquivo no Excel, use 'Salvar como' → 'Pasta de Trabalho do Excel (*.xlsx)' "
+            "e envie de novo o arquivo já convertido."
+        )
+
+    if df_raw.shape[0] <= LINHA_CABECALHO_CLI_FORNEC + 1 or df_raw.shape[1] <= max(COLS_CLI_FORNEC.values()):
+        return None, f"**{arquivo.name}** não tem linhas/colunas suficientes (esperado cabeçalho na linha 4 e dados até a coluna AB)."
+
+    rotulo = _texto(df_raw.iat[LINHA_CABECALHO_CLI_FORNEC, COLS_CLI_FORNEC["nome"]]).strip().lower()
+    if "fornecedor" in rotulo:
+        tipo_real = "FORNECEDOR"
+    elif "cliente" in rotulo:
+        tipo_real = "CLIENTE"
+    else:
+        tipo_real = tipo_esperado
+
+    dados = df_raw.iloc[LINHA_CABECALHO_CLI_FORNEC + 1:]
+
+    out = pd.DataFrame({
+        "Código":     dados.iloc[:, COLS_CLI_FORNEC["codigo"]],
+        "Nome":       dados.iloc[:, COLS_CLI_FORNEC["nome"]],
+        "CNPJ":       dados.iloc[:, COLS_CLI_FORNEC["cnpj"]],
+        "Espécie NF": dados.iloc[:, COLS_CLI_FORNEC["especie"]],
+        "Valor":      dados.iloc[:, COLS_CLI_FORNEC["valor"]],
+        "Base ICMS":  dados.iloc[:, COLS_CLI_FORNEC["base_icms"]],
+        "Valor ICMS": dados.iloc[:, COLS_CLI_FORNEC["valor_icms"]],
+    })
+
+    # remove a linha de rodapé ("Total de : NNNN") e linhas em branco — só
+    # sobrevive quem tem Código numérico e Nome preenchido
+    out["Código"] = pd.to_numeric(out["Código"], errors="coerce")
+    out = out[out["Código"].notna() & out["Nome"].notna()].copy()
+    if out.empty:
+        return None, f"**{arquivo.name}** não tem nenhuma linha de dados reconhecível."
+
+    out["Código"] = out["Código"].astype(int).astype(str)
+    out["CNPJ"] = out["CNPJ"].apply(_cnpj_digitos)
+    out["Nome"] = out["Nome"].apply(_texto)
+    out["Espécie NF"] = out["Espécie NF"].apply(_texto)
+    for c in ["Valor", "Base ICMS", "Valor ICMS"]:
+        out[c] = out[c].apply(_limpa_numero)
+    out["Tipo"] = tipo_real
+
+    return out.reset_index(drop=True), None
+
+
+@st.fragment
+def pagina_clientes_fornecedores_cnpj():
+    import plotly.graph_objects as go
+    st.empty()
+
+    st.markdown("<h2>CLIENTES / FORNEC CNPJ</h2>", unsafe_allow_html=True)
+    st.caption(
+        "Envie as planilhas exportadas do sistema (sem mesclagem de células). "
+        "É só leitura para análise — nada é gravado na planilha de empresas."
+    )
+
+    # os dados já processados ficam guardados no session_state (não só no
+    # próprio widget de upload), pra sobreviver a troca de menu — o Streamlit
+    # esvazia o file_uploader quando a página não é renderizada num rerun,
+    # mas o cache aqui continua valendo até o usuário mandar uma planilha nova
+    for chave in ["cf_dados_fornecedor", "cf_dados_cliente", "cf_nome_fornecedor", "cf_nome_cliente"]:
+        if chave not in st.session_state:
+            st.session_state[chave] = None
+
+    col_up1, col_up2 = st.columns(2)
+    with col_up1:
+        arq_fornec = st.file_uploader(
+            "Planilha de Fornecedores (Entradas)", type=["xls", "xlsx"], key="upl_cf_fornec"
+        )
+        if st.session_state["cf_nome_fornecedor"]:
+            st.caption(f"📄 Usando a última planilha enviada: **{st.session_state['cf_nome_fornecedor']}**")
+    with col_up2:
+        arq_cli = st.file_uploader(
+            "Planilha de Clientes (Saídas)", type=["xls", "xlsx"], key="upl_cf_cli"
+        )
+        if st.session_state["cf_nome_cliente"]:
+            st.caption(f"📄 Usando a última planilha enviada: **{st.session_state['cf_nome_cliente']}**")
+
+    houve_upload_novo = False
+    for arq, tipo, chave_dados, chave_nome in [
+        (arq_fornec, "FORNECEDOR", "cf_dados_fornecedor", "cf_nome_fornecedor"),
+        (arq_cli, "CLIENTE", "cf_dados_cliente", "cf_nome_cliente"),
+    ]:
+        if arq is None:
+            continue
+        df_parte, erro = _le_planilha_cliente_fornec(arq, tipo)
+        if erro:
+            st.error(erro)
+        elif df_parte is not None:
+            st.session_state[chave_dados] = df_parte
+            st.session_state[chave_nome] = arq.name
+            houve_upload_novo = True
+
+    partes = [p for p in (st.session_state["cf_dados_fornecedor"], st.session_state["cf_dados_cliente"]) if p is not None]
+
+    # nada na sessão nem upload novo — tenta usar o que já está salvo na
+    # planilha online (sobrevive a F5 e é visto por qualquer pessoa do
+    # escritório sem precisar reenviar o arquivo)
+    veio_da_planilha_online = False
+    meta_online = None
+    if not partes:
+        df_online, meta_online = _carrega_cli_fornec_da_planilha()
+        if df_online is None:
+            st.info("Envie ao menos uma das duas planilhas para começar.")
+            return
+        df_dados = df_online
+        veio_da_planilha_online = True
+    else:
+        df_dados = pd.concat(partes, ignore_index=True)
+
+    if veio_da_planilha_online:
+        if meta_online:
+            atualizado = meta_online.get("Atualizado em", "")
+            arq_f = meta_online.get("Arquivo Fornecedores", "")
+            arq_c = meta_online.get("Arquivo Clientes", "")
+            st.caption(
+                f"☁️ Mostrando os últimos dados salvos na planilha online (atualizado em {atualizado} — "
+                f"fornecedores: {arq_f or '—'} / clientes: {arq_c or '—'}). Envie uma planilha nova pra atualizar."
+            )
+    else:
+        # ── cruza com a GERAL: só empresas ATIVAS ────────────────────────────
+        df_geral = le_planilha_google(GOOGLE_SHEET_URL, SHEET_EMPRESAS)
+        if df_geral is None:
+            return
+
+        df_geral = df_geral.copy()
+
+        def _limpa_codigo(v):
+            s = str(v).strip()
+            if s.endswith(".0"):
+                s = s[:-2]
+            return s
+
+        df_geral["Código"] = df_geral["Código"].apply(_limpa_codigo)
+        df_ativas = df_geral[df_geral["Situação"].astype(str).str.upper() == "ATIVA"].copy()
+
+        mapa_empresa = {
+            row["Código"]: _texto(row.get("Razão Social", ""))
+            for _, row in df_ativas.iterrows() if row["Código"]
+        }
+
+        df_dados = df_dados[df_dados["Código"].isin(mapa_empresa.keys())].copy()
+        if df_dados.empty:
+            st.warning("Nenhuma das empresas encontradas nas planilhas enviadas está ATIVA na lista de empresas.")
+            return
+
+        df_dados["Empresa"] = df_dados["Código"].map(mapa_empresa)
+
+        # ── salva na planilha online só quando teve upload novo nesta execução
+        if houve_upload_novo:
+            ok_envio, erro_envio = _enviar_cli_fornec_apps_script(
+                df_dados, st.session_state["cf_nome_fornecedor"], st.session_state["cf_nome_cliente"]
+            )
+            if ok_envio:
+                st.success("💾 Dados salvos na planilha online — outras pessoas do escritório já veem sem precisar reenviar.")
+            else:
+                st.warning(f"Não consegui salvar os dados na planilha online (mas continuam disponíveis nesta sessão): {erro_envio}")
+
+    # ── filtros ───────────────────────────────────────────────────────────────
+    col_f1, col_f2 = st.columns([2, 1])
+    with col_f1:
+        opcoes_empresa = sorted(df_dados["Empresa"].unique())
+        empresa_sel = st.selectbox("Filtrar empresa", ["Todas"] + opcoes_empresa, key="cf_filtro_empresa")
+    with col_f2:
+        filtro_tipo = st.radio("Tipo", ["Todos", "CLIENTE", "FORNECEDOR"], horizontal=True, key="cf_filtro_tipo")
+
+    df_filtrado = df_dados if empresa_sel == "Todas" else df_dados[df_dados["Empresa"] == empresa_sel]
+    if filtro_tipo != "Todos":
+        df_filtrado = df_filtrado[df_filtrado["Tipo"] == filtro_tipo]
+
+    if df_filtrado.empty:
+        st.warning("Nenhum registro para os filtros selecionados.")
+        return
+
+    # ── RESUMO ────────────────────────────────────────────────────────────────
+    qtd_clientes = df_filtrado.loc[df_filtrado["Tipo"] == "CLIENTE", "CNPJ"].nunique()
+    qtd_fornecedores = df_filtrado.loc[df_filtrado["Tipo"] == "FORNECEDOR", "CNPJ"].nunique()
+    valor_clientes = df_filtrado.loc[df_filtrado["Tipo"] == "CLIENTE", "Valor"].sum()
+    valor_fornecedores = df_filtrado.loc[df_filtrado["Tipo"] == "FORNECEDOR", "Valor"].sum()
+    valor_icms_total = df_filtrado["Valor ICMS"].sum()
+
+    st.markdown("### Resumo", unsafe_allow_html=True)
+
+    def _fmt_moeda(v):
+        return f"R$ {v:,.2f}".replace(",", "§").replace(".", ",").replace("§", ".")
+
+    def _card(titulo, valor, cor_fundo, cor_borda):
+        st.markdown(
+            f"<div style='text-align:center; padding:10px; background:{cor_fundo}; "
+            f"border-radius:8px; border-left:4px solid {cor_borda};'>"
+            f"<span style='font-size:20px; font-weight:700; color:{cor_borda};'>{valor}</span><br>"
+            f"<span style='font-size:12px; color:#555;'>{titulo}</span></div>",
+            unsafe_allow_html=True,
+        )
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        _card("Empresas (ATIVAS)", df_filtrado["Empresa"].nunique(), "#eaf1fb", "#1d3f77")
+    with c2:
+        _card("Clientes (CNPJ únicos)", qtd_clientes, "#eafaf1", "#27ae60")
+    with c3:
+        _card("Fornecedores (CNPJ únicos)", qtd_fornecedores, "#fdedec", "#c0392b")
+    with c4:
+        _card("Valor Clientes", _fmt_moeda(valor_clientes), "#eafaf1", "#27ae60")
+    with c5:
+        _card("Valor Fornecedores", _fmt_moeda(valor_fornecedores), "#fdedec", "#c0392b")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── gráficos ──────────────────────────────────────────────────────────────
+    if "cf_chart_key" not in st.session_state:
+        st.session_state["cf_chart_key"] = 0
+
+    st.markdown("<h4 style='text-align:center; color:#1d3f77;'>Clientes x Fornecedores (R$)</h4>",
+                unsafe_allow_html=True)
+    fig_donut = go.Figure(data=[go.Pie(
+        labels=["Clientes", "Fornecedores"],
+        values=[float(valor_clientes), float(valor_fornecedores)],
+        hole=0.68,
+        marker=dict(colors=["#27ae60", "#c0392b"], line=dict(color="#ffffff", width=3)),
+        textinfo="none",
+        hovertemplate="<b>%{label}</b><br>R$ %{value:,.2f}<extra></extra>",
+        direction="clockwise", sort=False,
+    )])
+    fig_donut.update_layout(
+        paper_bgcolor="white", plot_bgcolor="white", showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+        margin=dict(t=10, b=10, l=10, r=10), height=260,
+    )
+    col_donut_esq, col_donut_centro, col_donut_dir = st.columns([1, 2, 1])
+    with col_donut_centro:
+        st.plotly_chart(fig_donut, use_container_width=True,
+                        key=f"chart_cf_donut_{st.session_state['cf_chart_key']}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Top 10 separado por tipo — agrupa por CNPJ (não só por Nome), porque o
+    # mesmo CNPJ pode aparecer com grafias diferentes de nome nas notas (ex:
+    # "CENTRO AR REFRIGERACAO AUTO" x "...AUTOMOTIVA LTDA")
+    def _top10_por_tipo(tipo, cor):
+        df_tipo = df_filtrado[df_filtrado["Tipo"] == tipo]
+        df_top10 = (
+            df_tipo.groupby("CNPJ", as_index=False)
+            .agg(Valor=("Valor", "sum"), Nome=("Nome", "first"))
+            .sort_values("Valor", ascending=False).head(10)
+        )
+        if df_top10.empty:
+            return None
+        df_top10["Rótulo"] = df_top10["Nome"] + " — " + df_top10["CNPJ"].apply(_formata_cnpj)
+        fig_bar = go.Figure(data=[go.Bar(
+            x=df_top10["Valor"], y=df_top10["Rótulo"], orientation="h",
+            marker=dict(color=cor),
+            text=df_top10["Valor"].apply(_fmt_moeda),
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate="<b>%{y}</b><br>R$ %{x:,.2f}<extra></extra>",
+        )])
+        fig_bar.update_layout(
+            paper_bgcolor="white", plot_bgcolor="white",
+            margin=dict(t=10, b=10, l=10, r=90), height=280,
+            yaxis=dict(autorange="reversed"),
+            xaxis=dict(visible=False),
+        )
+        return fig_bar
+
+    mostra_clientes = filtro_tipo in ("Todos", "CLIENTE")
+    mostra_fornecedores = filtro_tipo in ("Todos", "FORNECEDOR")
+    fig_cli = None
+    fig_forn = None
+
+    if mostra_clientes and mostra_fornecedores:
+        col_top_cli, col_top_forn = st.columns(2)
+    else:
+        col_top_cli = col_top_forn = st.container()
+
+    if mostra_clientes:
+        with col_top_cli:
+            st.markdown("<h4 style='text-align:center; color:#27ae60;'>Top 10 Clientes por Valor</h4>",
+                        unsafe_allow_html=True)
+            fig_cli = _top10_por_tipo("CLIENTE", "#27ae60")
+            if fig_cli is not None:
+                st.plotly_chart(fig_cli, use_container_width=True,
+                                key=f"chart_cf_top10_cli_{st.session_state['cf_chart_key']}")
+            else:
+                st.info("Nenhum cliente nos filtros selecionados.")
+
+    if mostra_fornecedores:
+        with col_top_forn:
+            st.markdown("<h4 style='text-align:center; color:#c0392b;'>Top 10 Fornecedores por Valor</h4>",
+                        unsafe_allow_html=True)
+            fig_forn = _top10_por_tipo("FORNECEDOR", "#c0392b")
+            if fig_forn is not None:
+                st.plotly_chart(fig_forn, use_container_width=True,
+                                key=f"chart_cf_top10_forn_{st.session_state['cf_chart_key']}")
+            else:
+                st.info("Nenhum fornecedor nos filtros selecionados.")
+
+    st.divider()
+
+    # ── lista ─────────────────────────────────────────────────────────────────
+    st.markdown("### Lista de Clientes/Fornecedores", unsafe_allow_html=True)
+
+    df_exib = df_filtrado[["Empresa", "Tipo", "Nome", "CNPJ", "Espécie NF", "Valor", "Base ICMS", "Valor ICMS"]].copy()
+    df_exib["CNPJ"] = df_exib["CNPJ"].apply(_formata_cnpj)
+    df_exib = df_exib.sort_values(["Empresa", "Tipo", "Nome"]).reset_index(drop=True)
+
+    df_show = _sanitiza_df(df_exib)
+    exibe_aggrid(df_show, height=450, grid_key="grid_cli_fornec")
+
+    output = BytesIO()
+    df_exib.to_excel(output, index=False)
+    st.download_button(
+        "📥 Baixar Excel", data=output.getvalue(),
+        file_name="clientes_fornecedores_cnpj.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+    # ── impressão: abre numa JANELA SEPARADA, 100% independente da página
+    # do Streamlit — não mexe em nada do DOM dela. Uma versão anterior tentava
+    # esconder/encolher o conteúdo na própria página do app pra imprimir só
+    # uma parte dela (via JS movendo elementos, escondendo irmãos etc.), mas
+    # colidia com o React do Streamlit recriando componentes em segundo
+    # plano e deixava a página TRAVADA depois de imprimir — problema sério o
+    # bastante pra abandonar aquela abordagem inteira e trocar por isto.
+    with st.expander("🖨️ IMPRIMIR"):
+        titulo_impressao = "Todas as empresas" if empresa_sel == "Todas" else empresa_sel
+
+        # nome sugerido do arquivo ao salvar como PDF = "Código - Empresa"
+        # (o Chrome usa o document.title da página como nome padrão do PDF)
+        codigo_impressao = ""
+        if empresa_sel != "Todas" and "Código" in df_filtrado.columns:
+            codigos_unicos = df_filtrado["Código"].unique()
+            if len(codigos_unicos) == 1:
+                codigo_impressao = str(codigos_unicos[0])
+        if empresa_sel == "Todas":
+            nome_arquivo_impressao = "Clientes_Fornecedores - Todas as empresas"
+        elif codigo_impressao:
+            nome_arquivo_impressao = f"Clientes_Fornecedores - {codigo_impressao} - {empresa_sel}"
+        else:
+            nome_arquivo_impressao = f"Clientes_Fornecedores - {empresa_sel}"
+        nome_arquivo_impressao = re.sub(r'[\\/:*?"<>|]', "", nome_arquivo_impressao).strip()
+
+        # cards de resumo + gráficos em HTML puro, pra montar a página que
+        # vai abrir na janela separada (nada disso é renderizado nesta
+        # página do Streamlit)
+        def _card_html(titulo, valor, cor_fundo, cor_borda):
+            return (
+                f"<div style='flex:1; text-align:center; padding:12px; background:{cor_fundo}; "
+                f"border-radius:8px; border-left:4px solid {cor_borda};'>"
+                f"<div style='font-size:22px; font-weight:700; color:{cor_borda};'>{valor}</div>"
+                f"<div style='font-size:13px; color:#555;'>{titulo}</div></div>"
+            )
+
+        cards_html = (
+            "<div style='display:flex; gap:14px; margin:18px 0;'>"
+            + _card_html("Empresas (ATIVAS)", df_filtrado["Empresa"].nunique(), "#eaf1fb", "#1d3f77")
+            + _card_html("Clientes (CNPJ únicos)", qtd_clientes, "#eafaf1", "#27ae60")
+            + _card_html("Fornecedores (CNPJ únicos)", qtd_fornecedores, "#fdedec", "#c0392b")
+            + _card_html("Valor Clientes", _fmt_moeda(valor_clientes), "#eafaf1", "#27ae60")
+            + _card_html("Valor Fornecedores", _fmt_moeda(valor_fornecedores), "#fdedec", "#c0392b")
+            + "</div>"
+        )
+
+        # cópias com dimensões fixas próprias pra impressão — as originais
+        # usam use_container_width, que só existe dentro do Streamlit, e não
+        # altera em nada os gráficos já desenhados nesta página. Donut + Top
+        # 10 ficam numa ÚNICA linha horizontal lado a lado (aproveita a
+        # orientação paisagem) — testado empilhados verticalmente e não
+        # cabiam numa página só (10 barras + legenda + donut passavam da
+        # altura de uma folha inteira).
+        figs_top10 = [f for f in (fig_cli, fig_forn) if f is not None]
+        n_top10 = len(figs_top10)
+        largura_donut = 260
+        largura_top10 = (1080 - largura_donut) // max(n_top10, 1)
+
+        fig_donut_print = go.Figure(fig_donut)
+        fig_donut_print.update_layout(width=largura_donut, height=320, margin=dict(t=10, b=60, l=10, r=10),
+                                       legend=dict(orientation="h", yanchor="top", y=-0.05, xanchor="center", x=0.5))
+        html_donut = fig_donut_print.to_html(full_html=False, include_plotlyjs="cdn", config={"displayModeBar": False})
+
+        graficos_top10_html = ""
+        for fig_original in figs_top10:
+            fig_p = go.Figure(fig_original)
+            fig_p.update_layout(width=largura_top10, height=320, margin=dict(t=10, b=10, l=230, r=80),
+                                 yaxis=dict(autorange="reversed", tickfont=dict(size=9)))
+            graficos_top10_html += fig_p.to_html(full_html=False, include_plotlyjs=False, config={"displayModeBar": False})
+
+        html_impressao = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{nome_arquivo_impressao}</title>
+<style>
+  @page {{ size: landscape; margin: 10mm; }}
+  body {{ font-family: "Source Sans Pro", Arial, sans-serif; margin: 0; padding: 16px; }}
+  h2 {{ color: #1d3f77; margin: 0 0 4px 0; }}
+</style>
+</head>
+<body>
+  <h2>Clientes/Fornecedores — {titulo_impressao}</h2>
+  {cards_html}
+  <div style="display:flex; gap:10px; align-items:flex-start;">
+    {html_donut}
+    {graficos_top10_html}
+  </div>
+</body></html>"""
+
+        import streamlit.components.v1 as components
+        html_botao_imprimir = """
+            <style>
+              button { width:100%; padding:10px; background:#1d3f77; color:#fff; border:none;
+                       border-radius:6px; font-size:15px; font-weight:600; cursor:pointer; font-family:sans-serif; }
+              button:hover { background:#16305c; }
+            </style>
+            <button onclick="imprimirJanela()">🖨️ Imprimir / Salvar como PDF</button>
+            <script>
+            function imprimirJanela() {
+                // abre numa janela separada, 100% independente da página do
+                // Streamlit — nunca mexe no DOM dela, então não tem como
+                // "travar" a página principal (o problema sério da versão
+                // anterior). Importante: window.open() direto, NÃO
+                // window.parent.open() — a ativação do clique do usuário
+                // (user activation) não se propaga do mesmo jeito entre
+                // frames, e usar parent.open() fazia o navegador bloquear a
+                // janela silenciosamente (sem erro nenhum) em alguns casos.
+                var win = window.open("", "_blank");
+                if (!win) {
+                    alert("O navegador bloqueou a janela de impressão. Permita pop-ups para este site e tente de novo.");
+                    return;
+                }
+                win.document.write(__HTML_JSON__);
+                win.document.close();
+                win.onload = function () {
+                    setTimeout(function () { win.print(); }, 600);
+                };
+            }
+            </script>
+        """.replace("__HTML_JSON__", json.dumps(html_impressao).replace("</script>", "<\\/script>"))
+        components.html(html_botao_imprimir, height=50)
+
+        st.caption(
+            "O botão acima abre uma janela separada já pronta pra impressão. Nela, escolha a "
+            "impressora <b>\"Salvar como PDF\"</b> (ou \"Microsoft Print to PDF\") e clique em Salvar. "
+            "Se o navegador bloquear a janela, permita pop-ups para este site e tente de novo."
+        )
+
+
+# ============================================================================
 # ROTEAMENTO
 # ============================================================================
 
@@ -3704,6 +4683,8 @@ with st.session_state.main_container.container():
         pagina_sem_acesso()
     elif pagina == "SEFAZ COMPARAÇÃO":
         pagina_sefaz_comparacao()
+    elif pagina == "CLIENTES/FORNEC CNPJ":
+        pagina_clientes_fornecedores_cnpj()
     elif pagina == "CERTIFICADOS":
         pagina_certificados()
     elif pagina == "ENDEREÇO DE EMAIL":
