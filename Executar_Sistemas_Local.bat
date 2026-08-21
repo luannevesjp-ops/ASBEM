@@ -1,18 +1,19 @@
 @echo off
 REM ============================================================================
-REM EXECUTAR SISTEMAS - LUATECH / ASBEM (versao local, sem servidor)
+REM EXECUTAR SISTEMAS - LUATECH / ASBEM (tela grafica local, sem servidor)
 REM
-REM Arquivo leve, sem instalacao nenhuma. Roda os sistemas (.exe ja
-REM compilados) DIRETO na maquina de quem clicar, lendo da pasta de rede
-REM compartilhada (a mesma pasta "AUTOMACAO\PROGRAMAS" que todo mundo ja
-REM tem acesso - so muda a letra de unidade de PC pra PC: a maioria ve como
-REM H:, uma maquina especifica ve como D:\ONEDRIVE, outras podem ver com
-REM outra letra ainda).
+REM Este .bat gera na hora uma telinha grafica (PowerShell + Windows Forms -
+REM ja vem em qualquer Windows, nao precisa instalar nada) com um checkbox pra
+REM cada sistema e um botao "Executar". A tela acha sozinha a pasta de rede
+REM compartilhada (a mesma "AUTOMACAO\PROGRAMAS" que todo mundo ja tem acesso -
+REM so muda a letra de unidade de PC pra PC: maioria ve como H:, uma maquina
+REM especifica ve como D:\ONEDRIVE, outras podem usar outra letra ainda).
 REM
-REM Por isso este arquivo NAO assume uma letra fixa: ele procura a pasta em
-REM varias letras conhecidas ate achar uma que exista naquela maquina. Se no
-REM futuro aparecer um PC com outra letra ainda, so adicionar mais uma linha
-REM na lista CANDIDATOS_RAIZ abaixo.
+REM O texto entre BASE64 abaixo e o script da telinha (Executar_Sistemas_Gui.ps1)
+REM codificado, so pra caber tudo num arquivo unico pra distribuir - o .bat
+REM escreve esse texto num arquivo temporario, decodifica de volta pro script
+REM original e roda ele. Nao mexer nesse bloco a mao; pra atualizar a tela,
+REM gerar um novo bloco a partir do .ps1 fonte (mantido a parte, legivel).
 REM
 REM Pode ser copiado pra qualquer PC (area de trabalho, pen drive, etc) - nao
 REM precisa estar dentro da pasta de rede pra funcionar. Distribuido pelo
@@ -20,139 +21,98 @@ REM botao "EXECUTAR SISTEMAS" do Gestor Fiscal (cada usuario baixa o seu).
 REM
 REM Sem acento nos textos deste arquivo de proposito: arquivo .bat depende da
 REM "code page" do Windows de cada PC pra mostrar acento certo, e isso varia
-REM de maquina pra maquina. Acento so em nome de pasta real (resolvido via
-REM curinga "?", nunca digitado direto), nunca em texto solto do menu.
+REM de maquina pra maquina.
 REM ============================================================================
 
-setlocal EnableDelayedExpansion
-title LUATECH - Executar Sistemas (local)
-cd /d %~dp0
+setlocal
+set "TMP_B64=%TEMP%\asbem_gui_%RANDOM%.b64"
+set "TMP_PS1=%TEMP%\asbem_gui_%RANDOM%.ps1"
 
-REM ----------------------------------------------------------------------
-REM 1) Achar a pasta EXECUSSOES, testando varias raizes conhecidas em ordem
-REM    de prioridade (H: primeiro, por ser a maioria; D:\ONEDRIVE depois,
-REM    que e onde da pra testar por enquanto).
-REM ----------------------------------------------------------------------
-set "RAIZ="
-
-for /d %%T in (
-    "H:\AUTOMA??O"
-    "D:\ONEDRIVE\AUTOMA??O"
-    "D:\AUTOMA??O"
-    "E:\AUTOMA??O"
-    "F:\AUTOMA??O"
-    "G:\AUTOMA??O"
-    "I:\AUTOMA??O"
-    "J:\AUTOMA??O"
-    "K:\AUTOMA??O"
-) do (
-    if not defined RAIZ (
-        for /d %%B in ("%%T\PROGRAMAS") do (
-            for /d %%C in ("%%B\EXECUSS?ES") do (
-                set "RAIZ=%%C"
-            )
-        )
-    )
+> "%TMP_B64%" (
+echo QWRkLVR5cGUgLUFzc2VtYmx5TmFtZSBTeXN0ZW0uV2luZG93cy5Gb3JtcwpBZGQtVHlwZSAtQXNzZW1ibHlOYW1lIFN5c3RlbS5E
+echo cmF3aW5nCgojIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t
+echo LS0tLS0KIyAxKSBBY2hhciBhIHBhc3RhIEVYRUNVU1NPRVMgKG1lc21hIGxvZ2ljYSBkbyAuYmF0LCBzw7MgcXVlIGVtIFBvd2Vy
+echo U2hlbGw6CiMgICAgdXNhIGN1cmluZ2EgIj8iIHByYSBhY2hhciBwYXN0YXMgYWNlbnR1YWRhcyBzZW0gcHJlY2lzYXIgZXNjcmV2
+echo ZXIgbwojICAgIGFjZW50byBjZXJ0byBubyBhcnF1aXZvLCB0ZXN0YW5kbyB2YXJpYXMgbGV0cmFzIGNvbmhlY2lkYXMgZW0gb3Jk
+echo ZW0pLgojIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t
+echo LS0KZnVuY3Rpb24gQnVzY2FyLVJhaXogewogICAgJGNhbmRpZGF0b3MgPSBAKCJIOlwiLCAiRDpcT05FRFJJVkVcIiwgIkQ6XCIs
+echo ICJFOlwiLCAiRjpcIiwgIkc6XCIsICJJOlwiLCAiSjpcIiwgIks6XCIpCiAgICBmb3JlYWNoICgkYyBpbiAkY2FuZGlkYXRvcykg
+echo ewogICAgICAgIGlmICgtbm90IChUZXN0LVBhdGggJGMpKSB7IGNvbnRpbnVlIH0KICAgICAgICAkYXV0b21hY2FvID0gR2V0LUNo
+echo aWxkSXRlbSAtTGl0ZXJhbFBhdGggJGMgLUZpbHRlciAiQVVUT01BPz9PIiAtRGlyZWN0b3J5IC1FcnJvckFjdGlvbiBTaWxlbnRs
+echo eUNvbnRpbnVlIHwgU2VsZWN0LU9iamVjdCAtRmlyc3QgMQogICAgICAgIGlmICgtbm90ICRhdXRvbWFjYW8pIHsgY29udGludWUg
+echo fQogICAgICAgICRwcm9ncmFtYXMgPSBHZXQtQ2hpbGRJdGVtIC1MaXRlcmFsUGF0aCAkYXV0b21hY2FvLkZ1bGxOYW1lIC1GaWx0
+echo ZXIgIlBST0dSQU1BUyIgLURpcmVjdG9yeSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8IFNlbGVjdC1PYmplY3QgLUZp
+echo cnN0IDEKICAgICAgICBpZiAoLW5vdCAkcHJvZ3JhbWFzKSB7IGNvbnRpbnVlIH0KICAgICAgICAkZXhlY3Vzc29lcyA9IEdldC1D
+echo aGlsZEl0ZW0gLUxpdGVyYWxQYXRoICRwcm9ncmFtYXMuRnVsbE5hbWUgLUZpbHRlciAiRVhFQ1VTUz9FUyIgLURpcmVjdG9yeSAt
+echo RXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8IFNlbGVjdC1PYmplY3QgLUZpcnN0IDEKICAgICAgICBpZiAoLW5vdCAkZXhl
+echo Y3Vzc29lcykgeyBjb250aW51ZSB9CiAgICAgICAgcmV0dXJuICRleGVjdXNzb2VzLkZ1bGxOYW1lCiAgICB9CiAgICByZXR1cm4g
+echo JG51bGwKfQoKZnVuY3Rpb24gUmVzb2x2ZS1FeGVTZWZheigkcmFpeikgewogICAgaWYgKC1ub3QgJHJhaXopIHsgcmV0dXJuICRu
+echo dWxsIH0KICAgICRzZWZheiA9IEdldC1DaGlsZEl0ZW0gLUxpdGVyYWxQYXRoICRyYWl6IC1GaWx0ZXIgIlNFRkFaIEFVVE9NQT8/
+echo TyIgLURpcmVjdG9yeSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8IFNlbGVjdC1PYmplY3QgLUZpcnN0IDEKICAgIGlm
+echo ICgkc2VmYXopIHsgcmV0dXJuIEpvaW4tUGF0aCAkc2VmYXouRnVsbE5hbWUgImRpc3RcU0VGQVpfU2l0ZVxTRUZBWl9TaXRlLmV4
+echo ZSIgfQogICAgcmV0dXJuICRudWxsCn0KCiRyYWl6ID0gQnVzY2FyLVJhaXoKCiRzaXN0ZW1hcyA9IEAoKQppZiAoJHJhaXopIHsK
+echo ICAgICRzaXN0ZW1hcyA9IEAoCiAgICAgICAgW3BzY3VzdG9tb2JqZWN0XUB7IE5vbWUgPSAiR2VyYXIgQ05EIjsgRXhlID0gKEpv
+echo aW4tUGF0aCAkcmFpeiAiQ05EIE1VTklDSVBBTFxkaXN0XEdlcmFyX0NORFxHZXJhcl9DTkQuZXhlIikgfQogICAgICAgIFtwc2N1
+echo c3RvbW9iamVjdF1AeyBOb21lID0gIkRNUyBTaXRlIjsgRXhlID0gKEpvaW4tUGF0aCAkcmFpeiAiUFJFRkVJVFVSQVxkaXN0XERN
+echo U19TaXRlXERNU19TaXRlLmV4ZSIpIH0KICAgICAgICBbcHNjdXN0b21vYmplY3RdQHsgTm9tZSA9ICJSRVNUIFNpdGUiOyBFeGUg
+echo PSAoSm9pbi1QYXRoICRyYWl6ICJQUkVGRUlUVVJBXGRpc3RcUkVTVF9TaXRlXFJFU1RfU2l0ZS5leGUiKSB9CiAgICAgICAgW3Bz
+echo Y3VzdG9tb2JqZWN0XUB7IE5vbWUgPSAiU0VGQVogU2l0ZSI7IEV4ZSA9IChSZXNvbHZlLUV4ZVNlZmF6ICRyYWl6KSB9CiAgICAg
+echo ICAgW3BzY3VzdG9tb2JqZWN0XUB7IE5vbWUgPSAiTWFsaGEgRmluYSBTRUZBWiI7IEV4ZSA9IChKb2luLVBhdGggJHJhaXogIk1B
+echo TEhBIEZJTkEgU0VGQVpcZGlzdFxNYWxoYV9GaW5hXE1hbGhhX0ZpbmEuZXhlIikgfQogICAgICAgIFtwc2N1c3RvbW9iamVjdF1A
+echo eyBOb21lID0gIkVtaXNzYW8gTkZTLWUgR29pYW5pYSI7IEV4ZSA9IChKb2luLVBhdGggJHJhaXogIkVNSVRJUiBOT1RBU1xFbWlz
+echo c2FvX05vdGFfR29pYW5pYS5leGUiKSB9CiAgICAgICAgW3BzY3VzdG9tb2JqZWN0XUB7IE5vbWUgPSAiRW1pc3NhbyBQYWRyYW8g
+echo TmFjaW9uYWwiOyBFeGUgPSAoSm9pbi1QYXRoICRyYWl6ICJFTUlUSVIgTk9UQVNcRW1pc3Nhb19QYWRyYW9fTmFjaW9uYWwuZXhl
+echo IikgfQogICAgICAgIFtwc2N1c3RvbW9iamVjdF1AeyBOb21lID0gIkVtaXNzYW8gUG9ydGFsIE5GUy1lIjsgRXhlID0gKEpvaW4t
+echo UGF0aCAkcmFpeiAiRU1JVElSIE5PVEFTXEVtaXNzYW9fUG9ydGFsX05mc2UuZXhlIikgfQogICAgKQp9CgokbGlua0dlc3RvciA9
+echo ICJodHRwczovL21xdmV0a3l1bHJybjNtZGx0b3N5dTQuc3RyZWFtbGl0LmFwcC8iCgojIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t
+echo LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KIyAyKSBKYW5lbGEKIyAtLS0tLS0tLS0tLS0t
+echo LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiRmb3JtID0gTmV3LU9iamVj
+echo dCBTeXN0ZW0uV2luZG93cy5Gb3Jtcy5Gb3JtCiRmb3JtLlRleHQgPSAiTFVBVEVDSCAtIEV4ZWN1dGFyIFNpc3RlbWFzIgokZm9y
+echo bS5TaXplID0gTmV3LU9iamVjdCBTeXN0ZW0uRHJhd2luZy5TaXplKDQyMCwgNDcwKQokZm9ybS5TdGFydFBvc2l0aW9uID0gIkNl
+echo bnRlclNjcmVlbiIKJGZvcm0uRm9ybUJvcmRlclN0eWxlID0gIkZpeGVkRGlhbG9nIgokZm9ybS5NYXhpbWl6ZUJveCA9ICRmYWxz
+echo ZQokZm9ybS5NaW5pbWl6ZUJveCA9ICRmYWxzZQoKJGxibFJhaXogPSBOZXctT2JqZWN0IFN5c3RlbS5XaW5kb3dzLkZvcm1zLkxh
+echo YmVsCmlmICgkcmFpeikgewogICAgJGxibFJhaXouVGV4dCA9ICJQYXN0YSBlbmNvbnRyYWRhOiAkcmFpeiIKfSBlbHNlIHsKICAg
+echo ICRsYmxSYWl6LlRleHQgPSAiQVZJU086IG5hbyBlbmNvbnRyZWkgYSBwYXN0YSBBVVRPTUFDQU9cUFJPR1JBTUFTXEVYRUNVU1NP
+echo RVMgZW0gbmVuaHVtYSB1bmlkYWRlIGNvbmhlY2lkYSAoSDosIEQ6XE9ORURSSVZFLCBEOiwgRTosIEY6LCBHOiwgSTosIEo6LCBL
+echo OikuIENvbmZpcm1lIHNldSBhY2Vzc28gYSByZWRlLiIKfQokbGJsUmFpei5BdXRvU2l6ZSA9ICRmYWxzZQokbGJsUmFpei5TaXpl
+echo ID0gTmV3LU9iamVjdCBTeXN0ZW0uRHJhd2luZy5TaXplKDM4MCwgNDUpCiRsYmxSYWl6LkxvY2F0aW9uID0gTmV3LU9iamVjdCBT
+echo eXN0ZW0uRHJhd2luZy5Qb2ludCgxMCwgMTApCiRmb3JtLkNvbnRyb2xzLkFkZCgkbGJsUmFpeikKCiRjaGVja2JveGVzID0gTmV3
+echo LU9iamVjdCBTeXN0ZW0uQ29sbGVjdGlvbnMuR2VuZXJpYy5MaXN0W1N5c3RlbS5XaW5kb3dzLkZvcm1zLkNoZWNrQm94XQokeSA9
+echo IDY1CmZvcmVhY2ggKCRzIGluICRzaXN0ZW1hcykgewogICAgJGNiID0gTmV3LU9iamVjdCBTeXN0ZW0uV2luZG93cy5Gb3Jtcy5D
+echo aGVja0JveAogICAgJGNiLlRleHQgPSAkcy5Ob21lCiAgICAkY2IuVGFnID0gJHMKICAgICRjYi5Mb2NhdGlvbiA9IE5ldy1PYmpl
+echo Y3QgU3lzdGVtLkRyYXdpbmcuUG9pbnQoMjAsICR5KQogICAgJGNiLlNpemUgPSBOZXctT2JqZWN0IFN5c3RlbS5EcmF3aW5nLlNp
+echo emUoMzYwLCAyNCkKICAgICRmb3JtLkNvbnRyb2xzLkFkZCgkY2IpCiAgICAkY2hlY2tib3hlcy5BZGQoJGNiKQogICAgJHkgKz0g
+echo MjgKfQoKZm9yZWFjaCAoJGNiIGluICRjaGVja2JveGVzKSB7CiAgICAkY2IuQWRkX0NoZWNrZWRDaGFuZ2VkKHsKICAgICAgICBw
+echo YXJhbSgkc2VuZGVyLCAkZSkKICAgICAgICBpZiAoJHNlbmRlci5DaGVja2VkKSB7CiAgICAgICAgICAgIGZvcmVhY2ggKCRvdGhl
+echo ciBpbiAkY2hlY2tib3hlcykgewogICAgICAgICAgICAgICAgaWYgKCRvdGhlciAtbmUgJHNlbmRlciAtYW5kICRvdGhlci5DaGVj
+echo a2VkKSB7ICRvdGhlci5DaGVja2VkID0gJGZhbHNlIH0KICAgICAgICAgICAgfQogICAgICAgIH0KICAgIH0uR2V0TmV3Q2xvc3Vy
+echo ZSgpKQp9CgokYnRuR2VzdG9yID0gTmV3LU9iamVjdCBTeXN0ZW0uV2luZG93cy5Gb3Jtcy5CdXR0b24KJGJ0bkdlc3Rvci5UZXh0
+echo ID0gIkFicmlyIEdlc3RvciBGaXNjYWwgKHNpdGUpIgokYnRuR2VzdG9yLkxvY2F0aW9uID0gTmV3LU9iamVjdCBTeXN0ZW0uRHJh
+echo d2luZy5Qb2ludCgyMCwgJHkpCiRidG5HZXN0b3IuU2l6ZSA9IE5ldy1PYmplY3QgU3lzdGVtLkRyYXdpbmcuU2l6ZSgzNjAsIDMw
+echo KQokYnRuR2VzdG9yLkFkZF9DbGljayh7IFN0YXJ0LVByb2Nlc3MgJGxpbmtHZXN0b3IgfS5HZXROZXdDbG9zdXJlKCkpCiRmb3Jt
+echo LkNvbnRyb2xzLkFkZCgkYnRuR2VzdG9yKQokeSArPSA0MAoKJGJ0bkV4ZWN1dGFyID0gTmV3LU9iamVjdCBTeXN0ZW0uV2luZG93
+echo cy5Gb3Jtcy5CdXR0b24KJGJ0bkV4ZWN1dGFyLlRleHQgPSAiRXhlY3V0YXIiCiRidG5FeGVjdXRhci5Mb2NhdGlvbiA9IE5ldy1P
+echo YmplY3QgU3lzdGVtLkRyYXdpbmcuUG9pbnQoMjAsICR5KQokYnRuRXhlY3V0YXIuU2l6ZSA9IE5ldy1PYmplY3QgU3lzdGVtLkRy
+echo YXdpbmcuU2l6ZSgxNzAsIDM1KQppZiAoLW5vdCAkcmFpeikgeyAkYnRuRXhlY3V0YXIuRW5hYmxlZCA9ICRmYWxzZSB9CiRmb3Jt
+echo LkNvbnRyb2xzLkFkZCgkYnRuRXhlY3V0YXIpCgokYnRuRmVjaGFyID0gTmV3LU9iamVjdCBTeXN0ZW0uV2luZG93cy5Gb3Jtcy5C
+echo dXR0b24KJGJ0bkZlY2hhci5UZXh0ID0gIkZlY2hhciIKJGJ0bkZlY2hhci5Mb2NhdGlvbiA9IE5ldy1PYmplY3QgU3lzdGVtLkRy
+echo YXdpbmcuUG9pbnQoMjEwLCAkeSkKJGJ0bkZlY2hhci5TaXplID0gTmV3LU9iamVjdCBTeXN0ZW0uRHJhd2luZy5TaXplKDE3MCwg
+echo MzUpCiRidG5GZWNoYXIuQWRkX0NsaWNrKHsgJGZvcm0uQ2xvc2UoKSB9LkdldE5ld0Nsb3N1cmUoKSkKJGZvcm0uQ29udHJvbHMu
+echo QWRkKCRidG5GZWNoYXIpCgokYnRuRXhlY3V0YXIuQWRkX0NsaWNrKHsKICAgICRzZWxlY2lvbmFkbyA9ICRjaGVja2JveGVzIHwg
+echo V2hlcmUtT2JqZWN0IHsgJF8uQ2hlY2tlZCB9IHwgU2VsZWN0LU9iamVjdCAtRmlyc3QgMQogICAgaWYgKC1ub3QgJHNlbGVjaW9u
+echo YWRvKSB7CiAgICAgICAgW1N5c3RlbS5XaW5kb3dzLkZvcm1zLk1lc3NhZ2VCb3hdOjpTaG93KCJNYXJxdWUgdW0gc2lzdGVtYSBh
+echo bnRlcyBkZSBjbGljYXIgZW0gRXhlY3V0YXIuIiwgIkF2aXNvIikgfCBPdXQtTnVsbAogICAgICAgIHJldHVybgogICAgfQogICAg
+echo JHNpcyA9ICRzZWxlY2lvbmFkby5UYWcKICAgIGlmICgtbm90ICRzaXMuRXhlIC1vciAtbm90IChUZXN0LVBhdGggLUxpdGVyYWxQ
+echo YXRoICRzaXMuRXhlKSkgewogICAgICAgIFtTeXN0ZW0uV2luZG93cy5Gb3Jtcy5NZXNzYWdlQm94XTo6U2hvdygiTmFvIGVuY29u
+echo dHJlaSBvIGFycXVpdm8gZGUgJyQoJHNpcy5Ob21lKScuIENvbmZpcm1lIGNvbSBvIHN1cG9ydGUgc2UgbyBjYW1pbmhvIG11ZG91
+echo LiIsICJFcnJvIikgfCBPdXQtTnVsbAogICAgICAgIHJldHVybgogICAgfQogICAgU3RhcnQtUHJvY2VzcyAtRmlsZVBhdGggJHNp
+echo cy5FeGUKICAgIFtTeXN0ZW0uV2luZG93cy5Gb3Jtcy5NZXNzYWdlQm94XTo6U2hvdygiJyQoJHNpcy5Ob21lKScgZm9pIGFiZXJ0
+echo byAtIGFjb21wYW5oZSBhIGphbmVsYSBxdWUgYXBhcmVjZXUuIiwgIlByb250byIpIHwgT3V0LU51bGwKfS5HZXROZXdDbG9zdXJl
+echo KCkpCgpbdm9pZF0kZm9ybS5TaG93RGlhbG9nKCkK
 )
 
-if not defined RAIZ (
-    echo.
-    echo Nao encontrei a pasta AUTOMACAO\PROGRAMAS\EXECUSSOES em nenhuma
-    echo unidade conhecida deste PC ^(H:, D:\ONEDRIVE, D:, E:, F:, G:, I:, J:, K:^).
-    echo.
-    echo Confirme se este PC tem acesso a pasta compartilhada da rede
-    echo ^(normalmente aparece como H: no "Meu Computador"^) e tente de novo.
-    echo Se a letra for outra, avise o suporte pra atualizar este arquivo.
-    echo.
-    pause
-    exit /b 1
-)
+certutil -decode "%TMP_B64%" "%TMP_PS1%" >nul
+del "%TMP_B64%" >nul 2>&1
 
-REM ----------------------------------------------------------------------
-REM 2) Montar o caminho de cada sistema (mesma estrutura de pastas que o
-REM    painel central usa - ver SISTEMAS em ASBEM_Exectar_Sistemas.py).
-REM    "SEFAZ AUTOMACAO" tem acento real na pasta, por isso resolve por
-REM    curinga em vez de escrever direto.
-REM ----------------------------------------------------------------------
-set "EXE_CND=%RAIZ%\CND MUNICIPAL\dist\Gerar_CND\Gerar_CND.exe"
-set "EXE_DMS=%RAIZ%\PREFEITURA\dist\DMS_Site\DMS_Site.exe"
-set "EXE_REST=%RAIZ%\PREFEITURA\dist\REST_Site\REST_Site.exe"
-set "EXE_MALHA=%RAIZ%\MALHA FINA SEFAZ\dist\Malha_Fina\Malha_Fina.exe"
-set "EXE_NOTAGO=%RAIZ%\EMITIR NOTAS\Emissao_Nota_Goiania.exe"
-set "EXE_NOTAPADRAO=%RAIZ%\EMITIR NOTAS\Emissao_Padrao_Nacional.exe"
-set "EXE_NOTAPORTAL=%RAIZ%\EMITIR NOTAS\Emissao_Portal_Nfse.exe"
-
-set "EXE_SEFAZ="
-for /d %%S in ("%RAIZ%\SEFAZ AUTOMA??O") do (
-    set "EXE_SEFAZ=%%S\dist\SEFAZ_Site\SEFAZ_Site.exe"
-)
-
-REM Link do Gestor Fiscal (site na nuvem) - so pra dar um atalho de volta,
-REM nao tem nenhuma dependencia da pasta de rede.
-set "LINK_GESTOR=https://mqvetkyulrrn3mdltosyu4.streamlit.app/"
-
-REM ----------------------------------------------------------------------
-REM 3) Menu
-REM ----------------------------------------------------------------------
-:menu
-cls
-echo ============================================================
-echo   LUATECH - EXECUTAR SISTEMAS (local)
-echo   Pasta encontrada em: %RAIZ%
-echo ============================================================
-echo.
-echo   1 - Gerar CND
-echo   2 - DMS Site
-echo   3 - REST Site
-echo   4 - SEFAZ Site
-echo   5 - Malha Fina SEFAZ
-echo   6 - Emissao NFS-e Goiania
-echo   7 - Emissao Padrao Nacional
-echo   8 - Emissao Portal NFS-e
-echo   9 - Abrir Gestor Fiscal (site)
-echo   0 - Sair
-echo.
-set "ESCOLHA="
-set /p ESCOLHA=Digite o numero e pressione ENTER:
-
-if "%ESCOLHA%"=="1" call :abrir "%EXE_CND%" "Gerar CND"
-if "%ESCOLHA%"=="2" call :abrir "%EXE_DMS%" "DMS Site"
-if "%ESCOLHA%"=="3" call :abrir "%EXE_REST%" "REST Site"
-if "%ESCOLHA%"=="4" call :abrir "%EXE_SEFAZ%" "SEFAZ Site"
-if "%ESCOLHA%"=="5" call :abrir "%EXE_MALHA%" "Malha Fina SEFAZ"
-if "%ESCOLHA%"=="6" call :abrir "%EXE_NOTAGO%" "Emissao NFS-e Goiania"
-if "%ESCOLHA%"=="7" call :abrir "%EXE_NOTAPADRAO%" "Emissao Padrao Nacional"
-if "%ESCOLHA%"=="8" call :abrir "%EXE_NOTAPORTAL%" "Emissao Portal NFS-e"
-if "%ESCOLHA%"=="9" start "" "%LINK_GESTOR%"
-if "%ESCOLHA%"=="0" exit /b 0
-
-goto menu
-
-REM ----------------------------------------------------------------------
-REM :abrir <caminho_exe> <nome_amigavel>
-REM ----------------------------------------------------------------------
-:abrir
-set "ALVO=%~1"
-set "NOME=%~2"
-if not defined ALVO (
-    echo.
-    echo Nao encontrei a pasta de "%NOME%" dentro de %RAIZ%.
-    echo Confirme com o suporte se o caminho mudou.
-    echo.
-    pause
-    goto :eof
-)
-if not exist "%ALVO%" (
-    echo.
-    echo Arquivo nao encontrado: %ALVO%
-    echo.
-    pause
-    goto :eof
-)
-echo.
-echo Abrindo %NOME% ...
-start "" "%ALVO%"
-echo Pronto - acompanhe a janela que abriu.
-echo.
-pause
-goto :eof
+start "" powershell -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TMP_PS1%"
+exit /b 0
