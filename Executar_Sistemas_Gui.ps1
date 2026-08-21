@@ -34,26 +34,30 @@ function Buscar-Raiz {
     return $null
 }
 
-function Resolve-ExeSefaz($raiz) {
+function Resolve-PastaSefaz($raiz) {
     if (-not $raiz) { return $null }
     $sefaz = Get-ChildItem -LiteralPath $raiz -Filter "SEFAZ AUTOMA??O" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($sefaz) { return Join-Path $sefaz.FullName "dist\SEFAZ_Site\SEFAZ_Site.exe" }
+    if ($sefaz) { return Join-Path $sefaz.FullName "dist\SEFAZ_Site" }
     return $null
 }
 
 $raiz = Buscar-Raiz
 
+# Cada sistema guarda a PASTA (nao o .exe direto) porque, antes de rodar, a
+# gente copia essa pasta inteira pro disco local (ver comentario mais abaixo,
+# perto do botao Executar) - precisa da pasta toda, com o .exe e as DLLs que
+# ficam do lado dele, nao so o arquivo do .exe sozinho.
 $sistemas = @()
 if ($raiz) {
     $sistemas = @(
-        [pscustomobject]@{ Nome = "Gerar CND"; Exe = (Join-Path $raiz "CND MUNICIPAL\dist\Gerar_CND\Gerar_CND.exe") }
-        [pscustomobject]@{ Nome = "DMS Site"; Exe = (Join-Path $raiz "PREFEITURA\dist\DMS_Site\DMS_Site.exe") }
-        [pscustomobject]@{ Nome = "REST Site"; Exe = (Join-Path $raiz "PREFEITURA\dist\REST_Site\REST_Site.exe") }
-        [pscustomobject]@{ Nome = "SEFAZ Site"; Exe = (Resolve-ExeSefaz $raiz) }
-        [pscustomobject]@{ Nome = "Malha Fina SEFAZ"; Exe = (Join-Path $raiz "MALHA FINA SEFAZ\dist\Malha_Fina\Malha_Fina.exe") }
-        [pscustomobject]@{ Nome = "Emissao NFS-e Goiania"; Exe = (Join-Path $raiz "EMITIR NOTAS\Emissao_Nota_Goiania.exe") }
-        [pscustomobject]@{ Nome = "Emissao Padrao Nacional"; Exe = (Join-Path $raiz "EMITIR NOTAS\Emissao_Padrao_Nacional.exe") }
-        [pscustomobject]@{ Nome = "Emissao Portal NFS-e"; Exe = (Join-Path $raiz "EMITIR NOTAS\Emissao_Portal_Nfse.exe") }
+        [pscustomobject]@{ Nome = "Gerar CND"; Chave = "Gerar_CND"; PastaOrigem = (Join-Path $raiz "CND MUNICIPAL\dist\Gerar_CND"); ExeNome = "Gerar_CND.exe" }
+        [pscustomobject]@{ Nome = "DMS Site"; Chave = "DMS_Site"; PastaOrigem = (Join-Path $raiz "PREFEITURA\dist\DMS_Site"); ExeNome = "DMS_Site.exe" }
+        [pscustomobject]@{ Nome = "REST Site"; Chave = "REST_Site"; PastaOrigem = (Join-Path $raiz "PREFEITURA\dist\REST_Site"); ExeNome = "REST_Site.exe" }
+        [pscustomobject]@{ Nome = "SEFAZ Site"; Chave = "SEFAZ_Site"; PastaOrigem = (Resolve-PastaSefaz $raiz); ExeNome = "SEFAZ_Site.exe" }
+        [pscustomobject]@{ Nome = "Malha Fina SEFAZ"; Chave = "Malha_Fina"; PastaOrigem = (Join-Path $raiz "MALHA FINA SEFAZ\dist\Malha_Fina"); ExeNome = "Malha_Fina.exe" }
+        [pscustomobject]@{ Nome = "Emissao NFS-e Goiania"; Chave = "Emissao_Nota_Goiania"; PastaOrigem = (Join-Path $raiz "EMITIR NOTAS"); ExeNome = "Emissao_Nota_Goiania.exe" }
+        [pscustomobject]@{ Nome = "Emissao Padrao Nacional"; Chave = "Emissao_Padrao_Nacional"; PastaOrigem = (Join-Path $raiz "EMITIR NOTAS"); ExeNome = "Emissao_Padrao_Nacional.exe" }
+        [pscustomobject]@{ Nome = "Emissao Portal NFS-e"; Chave = "Emissao_Portal_Nfse"; PastaOrigem = (Join-Path $raiz "EMITIR NOTAS"); ExeNome = "Emissao_Portal_Nfse.exe" }
     )
 }
 
@@ -134,11 +138,49 @@ $btnExecutar.Add_Click({
         return
     }
     $sis = $selecionado.Tag
-    if (-not $sis.Exe -or -not (Test-Path -LiteralPath $sis.Exe)) {
-        [System.Windows.Forms.MessageBox]::Show("Nao encontrei o arquivo de '$($sis.Nome)'. Confirme com o suporte se o caminho mudou.", "Erro") | Out-Null
+    if (-not $sis.PastaOrigem -or -not (Test-Path -LiteralPath $sis.PastaOrigem)) {
+        [System.Windows.Forms.MessageBox]::Show("Nao encontrei a pasta de '$($sis.Nome)'. Confirme com o suporte se o caminho mudou.", "Erro") | Out-Null
         return
     }
-    Start-Process -FilePath $sis.Exe
+
+    # Antes de abrir, copia a pasta do sistema (o .exe e as DLLs do lado
+    # dele) pra um cache local do usuario, via robocopy (so copia o que
+    # mudou desde a ultima vez - rapido depois da primeira execucao). Isso
+    # evita rodar o .exe direto pela rede, que fica bem lento (cada um dos
+    # varios arquivos internos precisa ser lido pela rede e escaneado pelo
+    # antivirus). O .exe roda igual estando na copia local, sem precisar de
+    # nenhum ajuste - ele acha sozinho suas dependencias do lado dele.
+    $pastaLocal = Join-Path $env:LOCALAPPDATA "LUATECH\$($sis.Chave)"
+    $textoOriginal = $btnExecutar.Text
+    $btnExecutar.Enabled = $false
+    $btnExecutar.Text = "Preparando..."
+    $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+    [System.Windows.Forms.Application]::DoEvents()
+
+    New-Item -ItemType Directory -Path $pastaLocal -Force -ErrorAction SilentlyContinue | Out-Null
+    $argsRobocopy = @("$($sis.PastaOrigem)", "$pastaLocal", "/MIR", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS")
+    $procRobocopy = Start-Process -FilePath "robocopy.exe" -ArgumentList $argsRobocopy -NoNewWindow -Wait -PassThru
+    $codigoRobocopy = $procRobocopy.ExitCode
+
+    $btnExecutar.Text = $textoOriginal
+    $btnExecutar.Enabled = $true
+    $form.Cursor = [System.Windows.Forms.Cursors]::Default
+
+    # Codigos do robocopy: 0-7 sao variacoes de sucesso, 8+ e erro de
+    # verdade. Se der erro na copia, cai pra rodar direto da rede (mais
+    # lento, mas ainda funciona) em vez de travar o usuario.
+    if ($codigoRobocopy -ge 8) {
+        [System.Windows.Forms.MessageBox]::Show("Nao consegui copiar os arquivos de '$($sis.Nome)' pra pasta local (codigo robocopy $codigoRobocopy). Vou tentar abrir direto da rede - pode demorar mais.", "Aviso") | Out-Null
+        $exeAlvo = Join-Path $sis.PastaOrigem $sis.ExeNome
+    } else {
+        $exeAlvo = Join-Path $pastaLocal $sis.ExeNome
+    }
+
+    if (-not (Test-Path -LiteralPath $exeAlvo)) {
+        [System.Windows.Forms.MessageBox]::Show("Nao encontrei o arquivo '$($sis.ExeNome)'. Confirme com o suporte se o caminho mudou.", "Erro") | Out-Null
+        return
+    }
+    Start-Process -FilePath $exeAlvo
     [System.Windows.Forms.MessageBox]::Show("'$($sis.Nome)' foi aberto - acompanhe a janela que apareceu.", "Pronto") | Out-Null
 }.GetNewClosure())
 
