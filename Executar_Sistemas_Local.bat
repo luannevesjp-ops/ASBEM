@@ -2,117 +2,41 @@
 REM ============================================================================
 REM EXECUTAR SISTEMAS - LUATECH / ASBEM (tela grafica local, sem servidor)
 REM
-REM Este .bat gera na hora uma telinha grafica (PowerShell + Windows Forms -
-REM ja vem em qualquer Windows, nao precisa instalar nada) com um checkbox pra
-REM cada sistema e um botao "Executar". A tela acha sozinha a pasta de rede
-REM compartilhada (a mesma "AUTOMACAO\PROGRAMAS" que todo mundo ja tem acesso -
-REM so muda a letra de unidade de PC pra PC: maioria ve como H:, uma maquina
-REM especifica ve como D:\ONEDRIVE, outras podem usar outra letra ainda).
+REM Arquivo simples, sem nenhum truque de codificacao/arquivo escondido (a
+REM versao anterior gerava um script na hora via certutil -decode, mas isso
+REM e um padrao classico de virus/malware e antivirus passou a bloquear -
+REM por isso agora sao DOIS arquivos de texto puro, sem nada disfarcado:
+REM este .bat e o Executar_Sistemas_Gui.ps1, que precisam ficar SEMPRE
+REM JUNTOS na mesma pasta (por isso a distribuicao e em .zip).
 REM
-REM O texto entre BASE64 abaixo e o script da telinha (Executar_Sistemas_Gui.ps1)
-REM codificado, so pra caber tudo num arquivo unico pra distribuir - o .bat
-REM escreve esse texto num arquivo temporario, decodifica de volta pro script
-REM original e roda ele. Nao mexer nesse bloco a mao; pra atualizar a tela,
-REM gerar um novo bloco a partir do .ps1 fonte (mantido a parte, legivel).
+REM Este .bat so abre a tela grafica (PowerShell + Windows Forms - ja vem em
+REM qualquer Windows, nao precisa instalar nada). A tela acha sozinha a
+REM pasta de rede compartilhada (letra de unidade varia por PC).
 REM
-REM Pode ser copiado pra qualquer PC (area de trabalho, pen drive, etc) - nao
-REM precisa estar dentro da pasta de rede pra funcionar. Distribuido pelo
-REM botao "EXECUTAR SISTEMAS" do Gestor Fiscal (cada usuario baixa o seu).
+REM Distribuido pelo botao "EXECUTAR SISTEMAS" do Gestor Fiscal, como um
+REM .zip com os dois arquivos - o usuario extrai o .zip inteiro (sem separar
+REM os arquivos) e roda este .bat.
 REM
 REM Sem acento nos textos deste arquivo de proposito: arquivo .bat depende da
 REM "code page" do Windows de cada PC pra mostrar acento certo, e isso varia
 REM de maquina pra maquina.
 REM ============================================================================
 
-setlocal
-set "TMP_B64=%TEMP%\asbem_gui_%RANDOM%.b64"
-set "TMP_PS1=%TEMP%\asbem_gui_%RANDOM%.ps1"
+set "PASTA_AQUI=%~dp0"
+set "PS1=%PASTA_AQUI%Executar_Sistemas_Gui.ps1"
 
-> "%TMP_B64%" (
-echo QWRkLVR5cGUgLUFzc2VtYmx5TmFtZSBTeXN0ZW0uV2luZG93cy5Gb3JtcwpBZGQtVHlwZSAtQXNzZW1ibHlOYW1lIFN5c3RlbS5E
-echo cmF3aW5nCgojIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t
-echo LS0tLS0KIyAxKSBBY2hhciBhIHBhc3RhIEVYRUNVU1NPRVMgKG1lc21hIGxvZ2ljYSBkbyAuYmF0LCBzw7MgcXVlIGVtIFBvd2Vy
-echo U2hlbGw6CiMgICAgdXNhIGN1cmluZ2EgIj8iIHByYSBhY2hhciBwYXN0YXMgYWNlbnR1YWRhcyBzZW0gcHJlY2lzYXIgZXNjcmV2
-echo ZXIgbwojICAgIGFjZW50byBjZXJ0byBubyBhcnF1aXZvLCB0ZXN0YW5kbyB2YXJpYXMgbGV0cmFzIGNvbmhlY2lkYXMgZW0gb3Jk
-echo ZW0pLgojIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t
-echo LS0KZnVuY3Rpb24gQnVzY2FyLVJhaXogewogICAgJGNhbmRpZGF0b3MgPSBAKCJIOlwiLCAiRDpcT05FRFJJVkVcIiwgIkQ6XCIs
-echo ICJFOlwiLCAiRjpcIiwgIkc6XCIsICJJOlwiLCAiSjpcIiwgIks6XCIpCiAgICBmb3JlYWNoICgkYyBpbiAkY2FuZGlkYXRvcykg
-echo ewogICAgICAgIGlmICgtbm90IChUZXN0LVBhdGggJGMpKSB7IGNvbnRpbnVlIH0KICAgICAgICAkYXV0b21hY2FvID0gR2V0LUNo
-echo aWxkSXRlbSAtTGl0ZXJhbFBhdGggJGMgLUZpbHRlciAiQVVUT01BPz9PIiAtRGlyZWN0b3J5IC1FcnJvckFjdGlvbiBTaWxlbnRs
-echo eUNvbnRpbnVlIHwgU2VsZWN0LU9iamVjdCAtRmlyc3QgMQogICAgICAgIGlmICgtbm90ICRhdXRvbWFjYW8pIHsgY29udGludWUg
-echo fQogICAgICAgICRwcm9ncmFtYXMgPSBHZXQtQ2hpbGRJdGVtIC1MaXRlcmFsUGF0aCAkYXV0b21hY2FvLkZ1bGxOYW1lIC1GaWx0
-echo ZXIgIlBST0dSQU1BUyIgLURpcmVjdG9yeSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8IFNlbGVjdC1PYmplY3QgLUZp
-echo cnN0IDEKICAgICAgICBpZiAoLW5vdCAkcHJvZ3JhbWFzKSB7IGNvbnRpbnVlIH0KICAgICAgICAkZXhlY3Vzc29lcyA9IEdldC1D
-echo aGlsZEl0ZW0gLUxpdGVyYWxQYXRoICRwcm9ncmFtYXMuRnVsbE5hbWUgLUZpbHRlciAiRVhFQ1VTUz9FUyIgLURpcmVjdG9yeSAt
-echo RXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8IFNlbGVjdC1PYmplY3QgLUZpcnN0IDEKICAgICAgICBpZiAoLW5vdCAkZXhl
-echo Y3Vzc29lcykgeyBjb250aW51ZSB9CiAgICAgICAgcmV0dXJuICRleGVjdXNzb2VzLkZ1bGxOYW1lCiAgICB9CiAgICByZXR1cm4g
-echo JG51bGwKfQoKZnVuY3Rpb24gUmVzb2x2ZS1FeGVTZWZheigkcmFpeikgewogICAgaWYgKC1ub3QgJHJhaXopIHsgcmV0dXJuICRu
-echo dWxsIH0KICAgICRzZWZheiA9IEdldC1DaGlsZEl0ZW0gLUxpdGVyYWxQYXRoICRyYWl6IC1GaWx0ZXIgIlNFRkFaIEFVVE9NQT8/
-echo TyIgLURpcmVjdG9yeSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8IFNlbGVjdC1PYmplY3QgLUZpcnN0IDEKICAgIGlm
-echo ICgkc2VmYXopIHsgcmV0dXJuIEpvaW4tUGF0aCAkc2VmYXouRnVsbE5hbWUgImRpc3RcU0VGQVpfU2l0ZVxTRUZBWl9TaXRlLmV4
-echo ZSIgfQogICAgcmV0dXJuICRudWxsCn0KCiRyYWl6ID0gQnVzY2FyLVJhaXoKCiRzaXN0ZW1hcyA9IEAoKQppZiAoJHJhaXopIHsK
-echo ICAgICRzaXN0ZW1hcyA9IEAoCiAgICAgICAgW3BzY3VzdG9tb2JqZWN0XUB7IE5vbWUgPSAiR2VyYXIgQ05EIjsgRXhlID0gKEpv
-echo aW4tUGF0aCAkcmFpeiAiQ05EIE1VTklDSVBBTFxkaXN0XEdlcmFyX0NORFxHZXJhcl9DTkQuZXhlIikgfQogICAgICAgIFtwc2N1
-echo c3RvbW9iamVjdF1AeyBOb21lID0gIkRNUyBTaXRlIjsgRXhlID0gKEpvaW4tUGF0aCAkcmFpeiAiUFJFRkVJVFVSQVxkaXN0XERN
-echo U19TaXRlXERNU19TaXRlLmV4ZSIpIH0KICAgICAgICBbcHNjdXN0b21vYmplY3RdQHsgTm9tZSA9ICJSRVNUIFNpdGUiOyBFeGUg
-echo PSAoSm9pbi1QYXRoICRyYWl6ICJQUkVGRUlUVVJBXGRpc3RcUkVTVF9TaXRlXFJFU1RfU2l0ZS5leGUiKSB9CiAgICAgICAgW3Bz
-echo Y3VzdG9tb2JqZWN0XUB7IE5vbWUgPSAiU0VGQVogU2l0ZSI7IEV4ZSA9IChSZXNvbHZlLUV4ZVNlZmF6ICRyYWl6KSB9CiAgICAg
-echo ICAgW3BzY3VzdG9tb2JqZWN0XUB7IE5vbWUgPSAiTWFsaGEgRmluYSBTRUZBWiI7IEV4ZSA9IChKb2luLVBhdGggJHJhaXogIk1B
-echo TEhBIEZJTkEgU0VGQVpcZGlzdFxNYWxoYV9GaW5hXE1hbGhhX0ZpbmEuZXhlIikgfQogICAgICAgIFtwc2N1c3RvbW9iamVjdF1A
-echo eyBOb21lID0gIkVtaXNzYW8gTkZTLWUgR29pYW5pYSI7IEV4ZSA9IChKb2luLVBhdGggJHJhaXogIkVNSVRJUiBOT1RBU1xFbWlz
-echo c2FvX05vdGFfR29pYW5pYS5leGUiKSB9CiAgICAgICAgW3BzY3VzdG9tb2JqZWN0XUB7IE5vbWUgPSAiRW1pc3NhbyBQYWRyYW8g
-echo TmFjaW9uYWwiOyBFeGUgPSAoSm9pbi1QYXRoICRyYWl6ICJFTUlUSVIgTk9UQVNcRW1pc3Nhb19QYWRyYW9fTmFjaW9uYWwuZXhl
-echo IikgfQogICAgICAgIFtwc2N1c3RvbW9iamVjdF1AeyBOb21lID0gIkVtaXNzYW8gUG9ydGFsIE5GUy1lIjsgRXhlID0gKEpvaW4t
-echo UGF0aCAkcmFpeiAiRU1JVElSIE5PVEFTXEVtaXNzYW9fUG9ydGFsX05mc2UuZXhlIikgfQogICAgKQp9CgokbGlua0dlc3RvciA9
-echo ICJodHRwczovL21xdmV0a3l1bHJybjNtZGx0b3N5dTQuc3RyZWFtbGl0LmFwcC8iCgojIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t
-echo LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KIyAyKSBKYW5lbGEKIyAtLS0tLS0tLS0tLS0t
-echo LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCiRmb3JtID0gTmV3LU9iamVj
-echo dCBTeXN0ZW0uV2luZG93cy5Gb3Jtcy5Gb3JtCiRmb3JtLlRleHQgPSAiTFVBVEVDSCAtIEV4ZWN1dGFyIFNpc3RlbWFzIgokZm9y
-echo bS5TaXplID0gTmV3LU9iamVjdCBTeXN0ZW0uRHJhd2luZy5TaXplKDQyMCwgNDcwKQokZm9ybS5TdGFydFBvc2l0aW9uID0gIkNl
-echo bnRlclNjcmVlbiIKJGZvcm0uRm9ybUJvcmRlclN0eWxlID0gIkZpeGVkRGlhbG9nIgokZm9ybS5NYXhpbWl6ZUJveCA9ICRmYWxz
-echo ZQokZm9ybS5NaW5pbWl6ZUJveCA9ICRmYWxzZQoKJGxibFJhaXogPSBOZXctT2JqZWN0IFN5c3RlbS5XaW5kb3dzLkZvcm1zLkxh
-echo YmVsCmlmICgkcmFpeikgewogICAgJGxibFJhaXouVGV4dCA9ICJQYXN0YSBlbmNvbnRyYWRhOiAkcmFpeiIKfSBlbHNlIHsKICAg
-echo ICRsYmxSYWl6LlRleHQgPSAiQVZJU086IG5hbyBlbmNvbnRyZWkgYSBwYXN0YSBBVVRPTUFDQU9cUFJPR1JBTUFTXEVYRUNVU1NP
-echo RVMgZW0gbmVuaHVtYSB1bmlkYWRlIGNvbmhlY2lkYSAoSDosIEQ6XE9ORURSSVZFLCBEOiwgRTosIEY6LCBHOiwgSTosIEo6LCBL
-echo OikuIENvbmZpcm1lIHNldSBhY2Vzc28gYSByZWRlLiIKfQokbGJsUmFpei5BdXRvU2l6ZSA9ICRmYWxzZQokbGJsUmFpei5TaXpl
-echo ID0gTmV3LU9iamVjdCBTeXN0ZW0uRHJhd2luZy5TaXplKDM4MCwgNDUpCiRsYmxSYWl6LkxvY2F0aW9uID0gTmV3LU9iamVjdCBT
-echo eXN0ZW0uRHJhd2luZy5Qb2ludCgxMCwgMTApCiRmb3JtLkNvbnRyb2xzLkFkZCgkbGJsUmFpeikKCiRjaGVja2JveGVzID0gTmV3
-echo LU9iamVjdCBTeXN0ZW0uQ29sbGVjdGlvbnMuR2VuZXJpYy5MaXN0W1N5c3RlbS5XaW5kb3dzLkZvcm1zLkNoZWNrQm94XQokeSA9
-echo IDY1CmZvcmVhY2ggKCRzIGluICRzaXN0ZW1hcykgewogICAgJGNiID0gTmV3LU9iamVjdCBTeXN0ZW0uV2luZG93cy5Gb3Jtcy5D
-echo aGVja0JveAogICAgJGNiLlRleHQgPSAkcy5Ob21lCiAgICAkY2IuVGFnID0gJHMKICAgICRjYi5Mb2NhdGlvbiA9IE5ldy1PYmpl
-echo Y3QgU3lzdGVtLkRyYXdpbmcuUG9pbnQoMjAsICR5KQogICAgJGNiLlNpemUgPSBOZXctT2JqZWN0IFN5c3RlbS5EcmF3aW5nLlNp
-echo emUoMzYwLCAyNCkKICAgICRmb3JtLkNvbnRyb2xzLkFkZCgkY2IpCiAgICAkY2hlY2tib3hlcy5BZGQoJGNiKQogICAgJHkgKz0g
-echo MjgKfQoKZm9yZWFjaCAoJGNiIGluICRjaGVja2JveGVzKSB7CiAgICAkY2IuQWRkX0NoZWNrZWRDaGFuZ2VkKHsKICAgICAgICBw
-echo YXJhbSgkc2VuZGVyLCAkZSkKICAgICAgICBpZiAoJHNlbmRlci5DaGVja2VkKSB7CiAgICAgICAgICAgIGZvcmVhY2ggKCRvdGhl
-echo ciBpbiAkY2hlY2tib3hlcykgewogICAgICAgICAgICAgICAgaWYgKCRvdGhlciAtbmUgJHNlbmRlciAtYW5kICRvdGhlci5DaGVj
-echo a2VkKSB7ICRvdGhlci5DaGVja2VkID0gJGZhbHNlIH0KICAgICAgICAgICAgfQogICAgICAgIH0KICAgIH0uR2V0TmV3Q2xvc3Vy
-echo ZSgpKQp9CgokYnRuR2VzdG9yID0gTmV3LU9iamVjdCBTeXN0ZW0uV2luZG93cy5Gb3Jtcy5CdXR0b24KJGJ0bkdlc3Rvci5UZXh0
-echo ID0gIkFicmlyIEdlc3RvciBGaXNjYWwgKHNpdGUpIgokYnRuR2VzdG9yLkxvY2F0aW9uID0gTmV3LU9iamVjdCBTeXN0ZW0uRHJh
-echo d2luZy5Qb2ludCgyMCwgJHkpCiRidG5HZXN0b3IuU2l6ZSA9IE5ldy1PYmplY3QgU3lzdGVtLkRyYXdpbmcuU2l6ZSgzNjAsIDMw
-echo KQokYnRuR2VzdG9yLkFkZF9DbGljayh7IFN0YXJ0LVByb2Nlc3MgJGxpbmtHZXN0b3IgfS5HZXROZXdDbG9zdXJlKCkpCiRmb3Jt
-echo LkNvbnRyb2xzLkFkZCgkYnRuR2VzdG9yKQokeSArPSA0MAoKJGJ0bkV4ZWN1dGFyID0gTmV3LU9iamVjdCBTeXN0ZW0uV2luZG93
-echo cy5Gb3Jtcy5CdXR0b24KJGJ0bkV4ZWN1dGFyLlRleHQgPSAiRXhlY3V0YXIiCiRidG5FeGVjdXRhci5Mb2NhdGlvbiA9IE5ldy1P
-echo YmplY3QgU3lzdGVtLkRyYXdpbmcuUG9pbnQoMjAsICR5KQokYnRuRXhlY3V0YXIuU2l6ZSA9IE5ldy1PYmplY3QgU3lzdGVtLkRy
-echo YXdpbmcuU2l6ZSgxNzAsIDM1KQppZiAoLW5vdCAkcmFpeikgeyAkYnRuRXhlY3V0YXIuRW5hYmxlZCA9ICRmYWxzZSB9CiRmb3Jt
-echo LkNvbnRyb2xzLkFkZCgkYnRuRXhlY3V0YXIpCgokYnRuRmVjaGFyID0gTmV3LU9iamVjdCBTeXN0ZW0uV2luZG93cy5Gb3Jtcy5C
-echo dXR0b24KJGJ0bkZlY2hhci5UZXh0ID0gIkZlY2hhciIKJGJ0bkZlY2hhci5Mb2NhdGlvbiA9IE5ldy1PYmplY3QgU3lzdGVtLkRy
-echo YXdpbmcuUG9pbnQoMjEwLCAkeSkKJGJ0bkZlY2hhci5TaXplID0gTmV3LU9iamVjdCBTeXN0ZW0uRHJhd2luZy5TaXplKDE3MCwg
-echo MzUpCiRidG5GZWNoYXIuQWRkX0NsaWNrKHsgJGZvcm0uQ2xvc2UoKSB9LkdldE5ld0Nsb3N1cmUoKSkKJGZvcm0uQ29udHJvbHMu
-echo QWRkKCRidG5GZWNoYXIpCgokYnRuRXhlY3V0YXIuQWRkX0NsaWNrKHsKICAgICRzZWxlY2lvbmFkbyA9ICRjaGVja2JveGVzIHwg
-echo V2hlcmUtT2JqZWN0IHsgJF8uQ2hlY2tlZCB9IHwgU2VsZWN0LU9iamVjdCAtRmlyc3QgMQogICAgaWYgKC1ub3QgJHNlbGVjaW9u
-echo YWRvKSB7CiAgICAgICAgW1N5c3RlbS5XaW5kb3dzLkZvcm1zLk1lc3NhZ2VCb3hdOjpTaG93KCJNYXJxdWUgdW0gc2lzdGVtYSBh
-echo bnRlcyBkZSBjbGljYXIgZW0gRXhlY3V0YXIuIiwgIkF2aXNvIikgfCBPdXQtTnVsbAogICAgICAgIHJldHVybgogICAgfQogICAg
-echo JHNpcyA9ICRzZWxlY2lvbmFkby5UYWcKICAgIGlmICgtbm90ICRzaXMuRXhlIC1vciAtbm90IChUZXN0LVBhdGggLUxpdGVyYWxQ
-echo YXRoICRzaXMuRXhlKSkgewogICAgICAgIFtTeXN0ZW0uV2luZG93cy5Gb3Jtcy5NZXNzYWdlQm94XTo6U2hvdygiTmFvIGVuY29u
-echo dHJlaSBvIGFycXVpdm8gZGUgJyQoJHNpcy5Ob21lKScuIENvbmZpcm1lIGNvbSBvIHN1cG9ydGUgc2UgbyBjYW1pbmhvIG11ZG91
-echo LiIsICJFcnJvIikgfCBPdXQtTnVsbAogICAgICAgIHJldHVybgogICAgfQogICAgU3RhcnQtUHJvY2VzcyAtRmlsZVBhdGggJHNp
-echo cy5FeGUKICAgIFtTeXN0ZW0uV2luZG93cy5Gb3Jtcy5NZXNzYWdlQm94XTo6U2hvdygiJyQoJHNpcy5Ob21lKScgZm9pIGFiZXJ0
-echo byAtIGFjb21wYW5oZSBhIGphbmVsYSBxdWUgYXBhcmVjZXUuIiwgIlByb250byIpIHwgT3V0LU51bGwKfS5HZXROZXdDbG9zdXJl
-echo KCkpCgpbdm9pZF0kZm9ybS5TaG93RGlhbG9nKCkK
+if not exist "%PS1%" (
+    echo.
+    echo Nao encontrei o arquivo Executar_Sistemas_Gui.ps1 nesta pasta:
+    echo %PASTA_AQUI%
+    echo.
+    echo Os dois arquivos - este .bat e o .ps1 - precisam estar juntos na
+    echo mesma pasta - confirme se extraiu o .zip inteiro, sem separar
+    echo os arquivos.
+    echo.
+    pause
+    exit /b 1
 )
 
-certutil -decode "%TMP_B64%" "%TMP_PS1%" >nul
-del "%TMP_B64%" >nul 2>&1
-
-start "" powershell -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TMP_PS1%"
+start "" powershell -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PS1%"
 exit /b 0

@@ -13,6 +13,7 @@ import os
 import re
 import base64
 import json
+import zipfile
 from pathlib import Path
 from datetime import date
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -50,11 +51,28 @@ CERT_DATA_FILE = Path(os.path.abspath(__file__)).parent / "cert_data.json"
 # ATUALIZADO 21/08/2026: o botão "EXECUTAR SISTEMAS" deixou de redirecionar pro
 # painel central (192.168.1.250:8502) — aquele servidor dependia da máquina do
 # escritório estar de pé E da rede/firewall deixar cada PC de usuário alcançar
-# esse IP, o que não estava funcionando na prática. Agora o botão baixa o
-# Executar_Sistemas_Local.bat: cada usuário roda esse arquivo direto na própria
-# máquina, sem depender de servidor nenhum — o .bat acha sozinho a pasta de
-# rede compartilhada (letra de unidade varia por PC) e abre o .exe local.
-EXECUTAR_SISTEMAS_BAT = Path(os.path.abspath(__file__)).parent / "Executar_Sistemas_Local.bat"
+# esse IP, o que não estava funcionando na prática. Agora o botão baixa um
+# .zip com Executar_Sistemas_Local.bat + Executar_Sistemas_Gui.ps1: cada
+# usuário extrai e roda o .bat direto na própria máquina, sem depender de
+# servidor nenhum — a tela acha sozinha a pasta de rede compartilhada (letra
+# de unidade varia por PC) e abre o .exe local escolhido.
+#
+# É .zip com 2 arquivos (não um .bat só) porque a primeira versão gerava o
+# script da tela na hora via "certutil -decode" escondido dentro do .bat —
+# um padrão clássico de malware, que antivírus real bloqueou num teste em
+# produção. Os dois arquivos agora são texto puro, sem nada codificado, mas
+# por isso precisam viajar juntos.
+_ASBEM_DIR = Path(os.path.abspath(__file__)).parent
+EXECUTAR_SISTEMAS_BAT = _ASBEM_DIR / "Executar_Sistemas_Local.bat"
+EXECUTAR_SISTEMAS_PS1 = _ASBEM_DIR / "Executar_Sistemas_Gui.ps1"
+
+
+def _montar_zip_executar_sistemas() -> bytes:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(EXECUTAR_SISTEMAS_BAT, arcname="Executar_Sistemas_Local.bat")
+        zf.write(EXECUTAR_SISTEMAS_PS1, arcname="Executar_Sistemas_Gui.ps1")
+    return buffer.getvalue()
 
 # ============================================================================
 # CSS E ESTILOS
@@ -996,9 +1014,9 @@ def tela_menu_principal():
         st.markdown('<div class="menu-btn">', unsafe_allow_html=True)
         st.download_button(
             "🖥️ EXECUTAR SISTEMAS",
-            data=EXECUTAR_SISTEMAS_BAT.read_bytes(),
-            file_name="Executar_Sistemas_Local.bat",
-            mime="application/bat",
+            data=_montar_zip_executar_sistemas(),
+            file_name="Executar_Sistemas_ASBEM.zip",
+            mime="application/zip",
             use_container_width=True,
             key="btn_executar_sistemas",
         )
