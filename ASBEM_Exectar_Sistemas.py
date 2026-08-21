@@ -34,12 +34,18 @@ PASTA_SISTEMAS = r"D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\EXECUSSÕES"
 # tem Python instalado, então não dá pra chamar "python script.py". Cada
 # caminho abaixo aponta pro .exe dentro da sua própria pasta onedir (o
 # _internal ao lado dele tem as dependências, não mexer separado do exe).
+# Caminhos batendo com o jeito que o usuário efetivamente copiou pra rede
+# (direto da pasta dist\ de cada build, sem reorganizar em COMPILADOS\) -
+# por isso o "\dist\<nome>\" no meio de quase todos.
 SISTEMAS = {
-    "Gerar CND": PASTA_SISTEMAS + r"\CND MUNICIPAL\Gerar_CND.exe",
-    "DMS Site": PASTA_SISTEMAS + r"\PREFEITURA\DMS_Site.exe",
-    "REST Site": PASTA_SISTEMAS + r"\PREFEITURA\REST SITE\REST_Site.exe",
-    "SEFAZ Site": PASTA_SISTEMAS + r"\SEFAZ AUTOMAÇÃO\SEFAZ_Site.exe",
-    "Malha Fina SEFAZ": PASTA_SISTEMAS + r"\MALHA FINA SEFAZ\Malha_Fina.exe",
+    "Gerar CND": PASTA_SISTEMAS + r"\CND MUNICIPAL\dist\Gerar_CND\Gerar_CND.exe",
+    "DMS Site": PASTA_SISTEMAS + r"\PREFEITURA\dist\DMS_Site\DMS_Site.exe",
+    "REST Site": PASTA_SISTEMAS + r"\PREFEITURA\dist\REST_Site\REST_Site.exe",
+    "SEFAZ Site": PASTA_SISTEMAS + r"\SEFAZ AUTOMAÇÃO\dist\SEFAZ_Site\SEFAZ_Site.exe",
+    "Malha Fina SEFAZ": PASTA_SISTEMAS + r"\MALHA FINA SEFAZ\dist\Malha_Fina\Malha_Fina.exe",
+    "Emissão NFS-e Goiânia": PASTA_SISTEMAS + r"\EMITIR NOTAS\Emissao_Nota_Goiania.exe",
+    "Emissão Padrão Nacional": PASTA_SISTEMAS + r"\EMITIR NOTAS\Emissao_Padrao_Nacional.exe",
+    "Emissão Portal NFS-e": PASTA_SISTEMAS + r"\EMITIR NOTAS\Emissao_Portal_Nfse.exe",
 }
 
 # ============================================================================
@@ -104,6 +110,14 @@ def executar_sistema(nome: str, caminho: str):
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            # Os .exe reconfiguram o próprio stdout pra UTF-8 (senão emoji/
+            # acento no print quebra com UnicodeEncodeError, cp1252 não
+            # representa). Sem declarar encoding aqui, o Popen decodifica o
+            # pipe com a codificação padrão do Windows (cp1252 numa máquina
+            # em português) — bytes UTF-8 lidos como cp1252 viram texto
+            # embaralhado ("â†’" em vez de "→"), mesmo sem erro nenhum.
+            encoding="utf-8",
+            errors="replace",
         )
     except Exception as e:
         st.error(f"Erro ao executar: {e}")

@@ -1256,3 +1256,951 @@ tinha):
     isso foi feito na máquina de destino - sem isso, Malha_Fina.exe e
     SEFAZ_Site.exe vão falhar ao tentar abrir o navegador (playwright.
     chromium.launch() não acha o executável).
+
+
+------------------------------------------------------------------------
+22) LAUNCHER PORTÁTIL RECRIADO + PRIMEIRO DEPLOY REAL NA 192.168.1.250
+    (20/08/2026, mesmo dia, depois de testar na máquina de verdade)
+------------------------------------------------------------------------
+Usuário testou o botão EXECUTAR SISTEMAS pela primeira vez na 192.168.1.250
+e recebeu "recusou a se conectar" - confirmado que era porque o LAUNCHER em
+si (ASBEM_Exectar_Sistemas.py, o Streamlit que escuta na porta 8502) nunca
+tinha sido colocado pra rodar naquela máquina. Isso é diferente de compilar
+os SISTEMAS (seção 21) - o launcher continua sendo um app Streamlit, só os
+sistemas que ele aciona viraram .exe.
+
+O Launcher_Portatil.zip preparado numa sessão anterior (Python embeddable +
+tkinter enxertado + selenium/playwright/etc, ver seção 10b) NÃO existe mais
+em lugar nenhum (procurado a fundo, confirmado que sumiu). Recriado do zero,
+porém MUITO mais simples/leve que antes: como os 5 sistemas agora são .exe
+standalone, o launcher (ASBEM_Exectar_Sistemas.py) só importa streamlit/
+subprocess/os/threading/time/pathlib - não precisa mais de tkinter, selenium,
+playwright, pandas, nada disso dentro do pacote portátil.
+
+Receita usada (em SISTEMAS PARA LUATECH\Launcher_Portatil\):
+  1. Baixado python-3.11.9-embed-amd64.zip oficial (python.org), extraído
+     em python311\.
+  2. Editado python311\python311._pth: descomentado "import site" (a
+     distribuição embeddable vem com isso desligado por padrão).
+  3. get-pip.py rodado pra instalar pip dentro do embeddable.
+  4. pip install streamlit==1.41.0 (mesma versão do requirements.txt do
+     Gestor Fiscal).
+  5. Iniciar_Launcher.bat: cd pra própria pasta, cria
+     %USERPROFILE%\.streamlit\credentials.toml com email vazio (evita o
+     prompt interativo de e-mail que o Streamlit faz no primeiro uso, que
+     travaria rodando sem terminal interativo), e roda
+     "python311\python.exe -m streamlit run ASBEM_Exectar_Sistemas.py
+     --server.port 8502 --server.address 0.0.0.0 --server.headless true
+     --browser.gatherUsageStats false".
+
+INCIDENTE - PACOTE CONTAMINADO PELO AMBIENTE DE DEV (achado e corrigido no
+mesmo dia): a primeira instalação (passos 3-4 acima) foi feita SEM
+PYTHONNOUSERSITE=1. Como "import site" também liga o "user site-packages"
+(pasta por usuário/versão do Python, independente de qual python.exe está
+rodando - neste caso C:\Users\luann\AppData\Roaming\Python\Python311\
+site-packages\, que JÁ tinha um monte de coisa instalada de outros
+trabalhos, incluindo o PyInstaller usado pra compilar os sistemas da seção
+21), o pip do embeddable viu vários pacotes "já satisfeitos" ali e não
+baixou tudo pra dentro de python311\Lib\site-packages\ de verdade -
+faltou blinker (descoberto só quando o usuário rodou na máquina do
+escritório: "ModuleNotFoundError: No module named 'blinker'") e
+provavelmente outras (pandas/numpy/pyarrow também não tinham sido baixadas
+completas). PIOR: esse mesmo pip install, ao resolver dependências,
+DESINSTALOU pillow/cachetools/streamlit/packaging da pasta compartilhada
+desta máquina de dev (viu "já instalado, mas versão errada" e trocou) -
+quebrou o ambiente Python normal desta máquina (confirmado via
+`pip check`: google-auth, pdfplumber, pyscreeze, pytesseract, reportlab,
+streamlit-aggrid todos ficaram com dependência faltando; PyInstaller parou
+de funcionar por falta de "packaging"). CORRIGIDO dos dois lados:
+  a) Ambiente de dev desta máquina: reinstalado packaging, pillow,
+     cachetools e streamlit==1.52.1 (versão que estava instalada antes,
+     seguindo a mensagem de "found existing installation" do log) via pip
+     install normal - `pip check` voltou a dar "No broken requirements
+     found". ATENÇÃO: os downloads deram erro de SSL ("self signed
+     certificate in certificate chain") direto do pip - contornado com
+     `--trusted-host pypi.org --trusted-host files.pythonhosted.org
+     --trusted-host pypi.python.org` (suspeita de antivírus/proxy local
+     fazendo inspeção HTTPS; o pip usa o cert bundle do pacote certifi, não
+     o do Windows, por isso PODE falhar em downloads mesmo quando curl/
+     navegador funcionam normalmente - lembrar disso se aparecer de novo).
+  b) python311\Lib\site-packages\ apagado e TODA a instalação (pip +
+     streamlit) refeita do zero, desta vez com PYTHONNOUSERSITE=1 setado
+     ANTES de rodar get-pip.py e pip install - resultado: lista completa de
+     verdade instalada (blinker, pandas, numpy, pyarrow, click, tornado,
+     watchdog, gitpython, jinja2, jsonschema etc, ~40 pacotes, pasta final
+     ~466MB, contra os ~172MB da instalação incompleta anterior).
+     Iniciar_Launcher.bat também ganhou "set PYTHONNOUSERSITE=1" antes de
+     rodar o streamlit, por segurança (mesmo que a máquina de destino nunca
+     tenha esse problema, não custa garantir isolamento).
+  VALIDAÇÃO REAL do isolamento: a pasta compartilhada desta máquina de dev
+  (C:\Users\luann\AppData\Roaming\Python\Python311\site-packages\) foi
+  RENOMEADA temporariamente (simulando uma máquina limpa sem essa pasta),
+  o Iniciar_Launcher.bat testado e respondeu HTTP 200 em localhost:8502
+  mesmo assim, depois a pasta foi renomeada de volta ao nome original -
+  só depois desse teste o pacote foi considerado confiável pra reenviar.
+LIÇÃO pra qualquer pacote portátil futuro (embeddable Python ou similar):
+SEMPRE setar PYTHONNOUSERSITE=1 tanto na hora de instalar quanto na hora de
+rodar - sem isso, o pip "empresta" pacotes de qualquer Python 3.x instalado
+na máquina de build, o pacote final fica incompleto de um jeito que só
+aparece rodando numa máquina realmente limpa, e o ambiente da máquina de
+build pode ficar danificado no processo.
+
+CAMINHOS REAIS DE DEPLOY (diferente do que a seção 21 documentava) -
+usuário copiou os sistemas direto das pastas dist\ de cada build (sem
+passar pela reorganização COMPILADOS\ que a seção 21 tinha preparado), então
+os caminhos de verdade em D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\EXECUSSÕES\ têm um
+"\dist\<nome>\" extra no meio que COMPILADOS\ não tinha:
+  CND MUNICIPAL\dist\Gerar_CND\Gerar_CND.exe
+  CND MUNICIPAL\MUNICÍPIOS GOIÁS\dist\<nome>\<nome>.exe (cada município)
+  PREFEITURA\dist\DMS_Site\DMS_Site.exe
+  PREFEITURA\dist\REST_Site\REST_Site.exe (SEM a subpasta "REST SITE" que
+    o SISTEMAS dict tinha antes - removida, não existe na prática)
+  SEFAZ AUTOMAÇÃO\dist\SEFAZ_Site\SEFAZ_Site.exe
+  MALHA FINA SEFAZ\dist\Malha_Fina\Malha_Fina.exe
+  EMITIR NOTAS\Emissao_Nota_Goiania.exe / Emissao_Padrao_Nacional.exe /
+    Emissao_Portal_Nfse.exe (sem dist\, esses 3 já existiam prontos de
+    antes, --onefile, copiados direto da pasta EMITIR NOTAS\)
+Corrigido em ASBEM_Exectar_Sistemas.py (SISTEMAS dict) e em Gerar_CND.py
+(cálculo de MUNICIPIOS_DIR quando frozen agora sobe 2 níveis a partir da
+pasta do próprio exe - Gerar_CND\ -> dist\ -> CND MUNICIPAL\ - antes de
+descer em MUNICÍPIOS GOIÁS\dist\). A pasta COMPILADOS\ preparada na seção 21
+ficou como estava, sem uso - o caminho real de deploy passou a ser
+diretamente as pastas dist\ de cada sistema-fonte. Reflita isso se um dia
+alguém for limpar arquivos "não usados" nesta pasta de dev.
+
+EMITIR NOTAS ADICIONADO AO LAUNCHER: os 3 emissores (Emissao_Nota_Goiania,
+Emissao_Padrao_Nacional, Emissao_Portal_Nfse) nunca tinham entrado no
+SISTEMAS dict - agora têm um botão cada. Já seguiam o padrão de criar a
+própria pasta de saída sozinhos (PASTA_RESULTADO.mkdir(parents=True,
+exist_ok=True), cada um com sua pasta fixa tipo C:\EMISSÃO DE NOTAS - ...) -
+só faltava INDICAR o caminho depois de rodar. Adicionado o caminho
+(PASTA_RESULTADO) na mensagem de log final (self.log(), que já vai pro
+stdout via StreamHandler e por isso aparece no painel do launcher) e no
+messagebox de conclusão/erro dos 3 arquivos. Recompilados como --onefile
+(mesmo padrão que os .exe que já existiam ali, sem pasta _internal
+separada) e copiados de volta pra dentro de EMITIR NOTAS\ (substituindo os
+.exe antigos, que ficaram sem essa mensagem de caminho).
+
+MALHA FINA - INTERVALO DE COMPETÊNCIA (mês a mês): o portal da SEFAZ só tem
+UM campo de período por consulta (#campoInicio; não existe campo de período
+final no formulário) - por isso Malha_Fina.py só consultava um mês por
+execução. Adicionada nova função gerar_periodos(inicial, final) que gera a
+lista MM/AAAA mês a mês entre os dois extremos (inclusive), e a tela
+tela_login_periodo() ganhou um segundo campo (Período Inicial + Período
+Final, validando que o final não vem antes do inicial). Dentro do laço de
+retry do navegador em main(), o preenchimento de período + processamento de
+empresas (preencher_periodo + processar_empresas) agora roda dentro de um
+for por periodo da lista, REAPROVEITANDO a mesma sessão/navegador pra todos
+os meses (não faz login de novo a cada competência - mesmo cuidado já
+documentado noutros lugares deste arquivo sobre evitar repetir login e
+disparar verificação do Cloudflare). Se o navegador cair no meio
+(ReiniciarNavegador) e reiniciar do primeiro mês do intervalo de novo,
+ja_processada() (que já checa por empresa+competência via nome de arquivo
+salvo) faz os meses/empresas já concluídos serem só pulados rapidamente, não
+reprocessados - por isso não foi necessário guardar/retomar de qual mês
+parou. Recompilado (--onedir --collect-all playwright, mesma receita de
+antes).
+
+
+------------------------------------------------------------------------
+23) DOIS BUGS REAIS PEGOS NO PRIMEIRO USO DE VERDADE NA 192.168.1.250
+    (20/08/2026, mesmo dia)
+------------------------------------------------------------------------
+a) UnicodeEncodeError ao rodar Gerar CND compilado: cp1252 (codificação
+   padrão do Windows em português) não representa caracteres como "→"/"✓"/
+   emojis já usados em vários print() destes scripts - rodando via
+   sys.executable normalmente isso não dava erro (console real usa outra
+   codificação), mas rodando como .exe com stdout redirecionado por PIPE
+   pelo launcher, o Python cai pra cp1252 e CRASHA no primeiro print com
+   esse tipo de caractere. Corrigido acrescentando, bem no topo de CADA
+   script que serve de ponto de entrada pro launcher (antes de qualquer
+   print), o mesmo bloco que REST_Site.py já tinha (motivo agora
+   documentado, antes não estava explicado em lugar nenhum):
+     os.environ.setdefault("PYTHONUTF8", "1")
+     if hasattr(sys.stdout, "reconfigure"):
+         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+     if hasattr(sys.stderr, "reconfigure"):
+         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+   Aplicado em: Gerar_CND.py, os 5 CND_*.py (município), DMS_Site.py (não
+   tinha nem "import sys" - acrescentado), Malha_Fina.py (idem),
+   SEFAZ_Site.py, e os 3 Emissao_*.py (EMITIR NOTAS). Todos os 12
+   recompilados. Validado isolado (script python -c reproduzindo o mesmo
+   cenário de pipe, com e sem o fix) antes de aceitar como resolvido.
+
+   EFEITO COLATERAL do fix acima, pego na sequência: depois de o .exe
+   passar a escrever de verdade em UTF-8 no pipe, o texto apareceu
+   EMBARALHADO no painel do launcher ("â†’" em vez de "→", "CND_GoiÃ¢nia.py"
+   em vez de "CND_Goiânia.py") - não crashava mais, mas ficou ilegível.
+   Causa: executar_sistema() em ASBEM_Exectar_Sistemas.py cria o
+   subprocess.Popen(..., text=True, ...) SEM declarar encoding - nesse
+   caso o Python decodifica o pipe com a codificação padrão do Windows
+   (cp1252), então bytes UTF-8 de verdade lidos como se fossem cp1252 viram
+   mojibake. Corrigido acrescentando encoding="utf-8", errors="replace" no
+   Popen do launcher, pro lado que LÊ o pipe bater com o lado que agora
+   ESCREVE em UTF-8. Validado isolado do mesmo jeito (Popen com e sem
+   encoding="utf-8" lendo um print de "→" por pipe).
+
+b) Gerar CND "concluído" sem salvar nada: usuário rodou de verdade e o
+   resumo final mostrou os municípios como processados normalmente, mas
+   nenhum arquivo foi gerado. Causa raiz de fundo: Chrome não está
+   instalado na 192.168.1.250 (pendência já sinalizada na seção 10b, nunca
+   resolvida) - undetected_chromedriver não acha o binário
+   (find_chrome_executable() devolve None), e o CND_<Município>.exe quebra
+   com "TypeError: Binary Location Must be a String" ao tentar abrir o
+   Chrome. MAS um bug separado do Gerar_CND.py MASCAROU esse erro: a
+   chamada subprocess.run([...], check=False) nunca verificava o código de
+   saída do sub-processo do município - o município entrava na lista de
+   "executados" incondicionalmente, então o resumo final mentia "concluído"
+   mesmo quando o .exe do município tinha quebrado feio. Corrigido: agora
+   só entra em municipios_executados quem terminou com returncode 0; quem
+   falhar entra numa lista nova municipios_com_erro, mostrada em vermelho
+   na janela de resumo final (que também troca o título pra "⚠️ Processo
+   concluído com erros"), e um print "[✗] ERRO ao processar {município}
+   (código de saída N)" sai no log do painel. Isso não resolve a causa raiz
+   (Chrome ausente, fora do meu alcance - só o usuário instala na máquina
+   dele) mas pelo menos não mente mais que deu certo.
+
+   PENDENTE (ação do usuário, não é código): instalar o Google Chrome na
+   192.168.1.250. Instalador per-user (sem admin) baixando direto de
+   google.com/chrome deveria funcionar - ver seção 10b pro contexto
+   original dessa pendência.
+
+------------------------------------------------------------------------
+24) CND MUNICÍPIOS: DETECÇÃO DE CHROME, __del__ SILENCIOSO, SELETOR
+    DE APARECIDA (RESOLVIDOS) + FLUXO REAL DE JATAÍ + CAPTCHA EM RIO
+    VERDE (20/08/2026, mesmo dia)
+------------------------------------------------------------------------
+Depois que o usuário instalou o Chrome na 192.168.1.250 (pendência da
+seção 23b), apareceram mais 2 problemas reais nos 5 scripts CND_*.py, os
+dois já corrigidos e CONFIRMADOS funcionando pelo usuário:
+
+a) "'wmic' não é reconhecido" / SessionNotCreatedException (ChromeDriver
+   152 vs Chrome 151 instalado): obter_versao_chrome() em cada CND_*.py
+   dependia do comando `wmic`, que foi removido a partir do Windows 11
+   24H2. Sem versão detectada, undetected_chromedriver caía pro
+   ChromeDriver mais recente disponível em vez do que bate com o Chrome
+   de verdade instalado. Corrigido: novo método PRINCIPAL lê a subpasta
+   versionada dentro de Application\ (ex: "151.0.7922.174\", sempre
+   criada do lado do chrome.exe pelo instalador) via os.listdir + regex
+   -\d+\.\d+\.\d+\.\d+$ -, sem depender de nenhum comando externo; `wmic`
+   virou só fallback (funciona em Windows mais antigos onde ainda existe).
+   Aplicado nos 5: CND_Goiânia.py, CND_ApdeGoiânia.py, CND_Betha.py,
+   CND_Jatai.py, CND_RioVerde.py.
+
+b) "Exception ignored in: <function Chrome.__del__>" / OSError: [WinError
+   6] Identificador inválido no log: undetected_chromedriver tenta fechar
+   o Chrome de novo no __del__ (coletor de lixo) mesmo quando o processo
+   já tinha terminado sozinho antes - erro de limpeza inofensivo (não
+   afeta o resultado) mas some no log fazendo parecer que algo quebrou.
+   Corrigido com monkey-patch em uc.Chrome.__del__ logo após o import,
+   engolindo só OSError. Aplicado nos mesmos 5 arquivos.
+
+c) TimeoutException vazio em Aparecida de Goiânia (CND_ApdeGoiânia.py,
+   linha ~383): usuário reportou timeout sem detalhe. Primeiro melhorada
+   a captura de erro (traceback.print_exc() + tipo da exceção no print)
+   pra próxima execução trazer o traceback real. Com o traceback
+   apontando pra wait.until(...By.ID, "62inputText"), inspecionei o
+   portal ao vivo (Playwright, headless, indo direto na URL de produção
+   https://sigp.aparecida.go.gov.br/sig/app.html#/servicosonline/debito-
+   contribuinte) e confirmei que o id gerado pelo framework tinha mudado
+   pra "63inputText" - são ids numéricos que o framework recria a cada
+   deploy/sessão, não são estáveis. Trocado pro seletor CSS
+   input[id$='inputText'] (sufixo fixo, imune ao número que muda na
+   frente), validado ao vivo (bateu com exatamente 1 elemento) antes de
+   recompilar. CONFIRMADO funcionando pelo usuário depois do rebuild.
+
+Com os 3 pontos acima resolvidos e confirmados, o usuário pediu pra fazer
+"o mesmo" (aplicar a mesma disciplina de investigação ao vivo) nos 3
+scripts que faltavam: CND_Betha.py, CND_Jatai.py, CND_RioVerde.py. Betha
+e RioVerde/Jatai NUNCA tinham sido testados de ponta a ponta contra o
+site real - os seletores neles eram só "melhor palpite" com comentários
+TODO explícitos pedindo confirmação. Investigação feita com Playwright
+(inspeção ao vivo, headless) direto nos 2 portais que estavam realmente
+em uso (Jataí e Rio Verde constam em MUNICIPIOS_SUPORTADOS dentro de
+Gerar_CND.py; Betha é só um TEMPLATE genérico, ENTITY_CODE ainda
+"XXXXX-XXX", nenhuma cidade Betha configurada/registrada no dict ainda -
+não dá pra testar nem faz sentido mexer até o usuário configurar uma
+cidade de verdade nele):
+
+JATAÍ (CND_Jatai.py) - reescrito com o fluxo real confirmado:
+  A URL do formulário NÃO tem campo de CNPJ direto na tela principal (o
+  código antigo procurava um input com "cnpj"/"document" no id e nunca
+  batia). O fluxo de verdade é em 2 passos, plataforma BSiT/JSF:
+    1. Botão "Consultar Empresa" (id
+       companyCertificateDebitSearchForm:searchCompanyRegister) abre um
+       MODAL de busca de empresa.
+    2. Dentro do modal: campo CNPJ é
+       formSearchCompany:personSearchCNPJ, botão de busca é
+       formSearchCompany:sendFilter.
+    3. Selecionar o resultado da busca deve preencher o campo
+       companyCertificateDebitSearchForm:municipalRegistration
+       (inscrição municipal) automaticamente; clicar de novo no mesmo
+       botão "Consultar Empresa" deveria então emitir a certidão.
+  Os passos 1-2 foram CONFIRMADOS ao vivo (o modal abre, o campo aceita
+  texto, a busca roda de verdade - testado com um CNPJ genérico que não
+  está cadastrado no portal, então a busca voltou "não localizado", o que
+  é o comportamento esperado pra um CNPJ que não existe lá). O passo 3
+  (selecionar a linha do resultado + emissão) NÃO foi validado de ponta a
+  ponta por falta de um CNPJ real cadastrado no portal de Jataí pra
+  testar - o código foi escrito com o seletor mais razoável (clicar na
+  primeira linha de <table><tbody><tr>) e ganhou traceback.print_exc() +
+  tipo da exceção no log de erro (mesmo padrão do fix de Aparecida), pra
+  se travar nesse passo o próximo log já trazer o traceback exato e a
+  correção ser rápida, sem precisar de mais rodadas de adivinhação.
+  Recompilado (dist/CND_Jatai/). AÇÃO DO USUÁRIO: rodar com uma empresa
+  de Jataí de verdade (cadastrada no portal) e mandar o log; se travar no
+  passo de seleção do resultado, o traceback já vai apontar a linha certa.
+
+RIO VERDE (CND_RioVerde.py) - BLOQUEADO POR CAPTCHA, não corrigido:
+  A URL certa é https:// (não http:// como estava no código - o site
+  responde "Requisição Rejeitada" pra requisições sem um User-Agent de
+  navegador real, o que undetected_chromedriver já contorna sozinho, não
+  precisa mexer nisso). O formulário de emissão em si foi localizado
+  (campo #cpfcnpjcontribuinte, botão submit "Emitir", form
+  id="form-report", method GET pra /servicos/certidaonegativa) - MAS ao
+  preencher o CNPJ e submeter, o site responde com um popup "Captcha
+  Necessário" antes de gerar a certidão. Isso é um bloqueio de verdade,
+  não um bug de seletor: não dá pra automatizar esse passo sem resolver
+  um captcha (serviço pago de resolução de captcha, ou intervenção manual
+  a cada emissão) - não tentei contornar. CND_RioVerde.py ficou como
+  estava (não editado, não recompilado) até o usuário decidir o caminho:
+  a) aceitar que Rio Verde vira manual (só o usuário emite direto no
+     site quando precisar), b) integrar um serviço de resolução de
+     captcha (custo recorrente, novo escopo), ou c) verificar se existe
+     algum jeito alternativo de emitir sem captcha (ex: com login em vez
+     de emissão anônima) que eu não vi na tela pública testada.
+
+------------------------------------------------------------------------
+25) DMS_Site.exe: PermissionError "Acesso negado: C:\Users\luann" NA
+    192.168.1.250 (20/08/2026, mesmo dia)
+------------------------------------------------------------------------
+Contradiz o que a seção 21 tinha registrado ("Nenhum outro arquivo-fonte
+precisou de mudança, todos já usavam caminhos absolutos fixos") - essa nota
+estava ERRADA especificamente pra DMS_Site.py. Usuário reportou traceback
+real rodando na 192.168.1.250:
+  PermissionError: [WinError 5] Acesso negado: 'C:\\Users\\luann'
+  (em criar_pastas(), __init__ -> os.makedirs)
+
+Causa: DMS_Site.py (SISTEMAS PARA LUATECH\PREFEITURA\, o caminho ativo)
+tinha PASTA_PROJETO = r"C:\Users\luann\OneDrive\Documentos\DESENVOLVIMENTO\
+PY\PREFEITURA\DMS SITE" hardcoded (caminho da máquina de DEV, não existe
+na 192.168.1.250), usado só pra montar PASTA_PRINTS = PASTA_PROJETO +
+"\Prints" (pasta de prints de tela em caso de erro). criar_pastas() tentava
+os.makedirs(PASTA_PROJETO) na 192.168.1.250 e batia em PermissionError por
+não ter esse usuário/pasta lá. Esse MESMO bug já tinha sido corrigido antes
+numa versão irmã mais antiga do arquivo (PY\PREFEITURA\DMS SITE\DMS_Site.py,
+NÃO é o caminho ativo do launcher) usando
+PASTA_PROJETO = os.path.dirname(os.path.abspath(__file__)) - mas essa
+correção nunca foi replicada pro arquivo que o launcher realmente usa.
+
+Correção aplicada (SISTEMAS PARA LUATECH\PREFEITURA\DMS_Site.py): removida
+PASTA_PROJETO por completo. PASTA_PRINTS passou a ser
+os.path.join(PASTA_SAIDA_DMS, "Prints") - ou seja, dentro de
+C:\PREFEITURA\DMS\Prints, reaproveitando PASTA_SAIDA_DMS (já um caminho
+fixo independente de usuário, já usado pra XML/observações). De propósito
+NÃO se usou __file__/os.path.dirname(os.path.abspath(__file__)) como na
+versão irmã: como este arquivo agora roda compilado (.exe PyInstaller
+--onedir, ver seção 21), __file__ apontaria pra dentro da pasta de extração
+do executável, não é o lugar certo pra guardar prints persistentes entre
+execuções. criar_pastas() ajustada (pastas = [PASTA_PRINTS] em vez de
+[PASTA_PROJETO, PASTA_PRINTS] - os.makedirs já cria os pais sozinho).
+
+RECOMPILADO na mesma sessão (mesmo comando documentado na seção 21, com
+--collect-submodules selenium + --collect-all undetected_chromedriver):
+novo DMS_Site.exe gerado em SISTEMAS PARA LUATECH\PREFEITURA\dist\DMS_Site\.
+PENDENTE (ação do usuário): copiar essa pasta dist\DMS_Site\ inteira pra
+dentro de D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\EXECUSSÕES\PREFEITURA\dist\
+DMS_Site\ na 192.168.1.250 (via Área de Trabalho Remota, mesmo processo da
+seção 22 - esta máquina de dev não enxerga o drive D:), substituindo o .exe
+antigo. Sem isso, a máquina do escritório continua rodando o .exe velho com
+o bug.
+
+Checado no mesmo grep (toda a pasta SISTEMAS PARA LUATECH, só arquivos
+.py): nenhum outro sistema tem hardcode de "C:\Users\luann" - só este
+arquivo tinha esse problema.
+
+------------------------------------------------------------------------
+26) DMS_Site.exe: MAIS 2 PROBLEMAS NO MESMO TESTE NA 192.168.1.250
+    (20/08/2026, mesmo dia, depois da correção da seção 25)
+------------------------------------------------------------------------
+Usuário testou de novo (já com a correção da seção 25 aplicada) e reportou
+log novo:
+  - "'wmic' não é reconhecido..." (aparece 2x)
+  - depois de marcar empresas e clicar "Continuar" na tela de seleção,
+    "passou 2 minutos e a janela de seleção de empresa abriu novamente" e
+    o processo não avançou pra pedir login.
+
+a) WMIC: DMS_Site.py tinha o MESMO bug já corrigido nos CND_*.py (seção
+   24a) - obter_versao_chrome() dependia só de `wmic` (removido a partir
+   do Windows 11 24H2) pra descobrir a versão do Chrome instalado e casar
+   com o chromedriver. Corrigido replicando exatamente o mesmo padrão dos
+   CND_*.py: método principal lê a subpasta versionada dentro de
+   Application\ (ex: "151.0.7922.174\") via os.listdir + regex, sem
+   depender de comando nenhum; `wmic` virou só fallback.
+
+b) JANELA DE SELEÇÃO "REABRINDO": investigado o fluxo completo (tela_
+   selecionar_empresas -> baixar_e_selecionar_empresas -> executar) e
+   confirmado que não existe, no código, nenhum caminho que leve de volta
+   pra tela de seleção depois de confirmada - confirmar() dentro da tela
+   sempre atribui a lista selecionada antes de fechar a janela quando tem
+   pelo menos 1 empresa marcada. Ou seja: se o usuário realmente marcou e
+   clicou Continuar, aquele PROCESSO especificamente seguiu em frente
+   normalmente. A explicação mais provável pra "janela reabrindo depois de
+   2 minutos": DOIS processos DMS_Site.exe rodando ao mesmo tempo na
+   192.168.1.250 (duplo clique no botão do painel, segunda aba do
+   navegador, ou outra pessoa clicando quase junto) - cada processo tem
+   sua PRÓPRIA janela de seleção; a proteção "já está rodando" em
+   ASBEM_Exectar_Sistemas.py (`st.session_state["execucoes"]`) só vale
+   DENTRO da mesma sessão/aba do navegador (cada conexão Streamlit tem seu
+   próprio session_state) - não impede duas sessões diferentes lançando o
+   mesmo .exe ao mesmo tempo. A decisão de produto já registrada na seção
+   6 ("clicar de novo num sistema já rodando é BLOQUEADO... não abre 2º
+   processo em paralelo do mesmo sistema") sempre teve essa lacuna na
+   implementação real.
+
+   Corrigido fechando a lacuna DENTRO do próprio DMS_Site.py (garantia no
+   nível do processo/máquina, não depende mais da sessão do Streamlit):
+   novo lock de arquivo em C:\PREFEITURA\DMS\.dms_site.lock (dentro de
+   PASTA_SAIDA_DMS, mesmo caminho fixo independente de usuário da seção
+   25), guardando o PID de quem está rodando. obter_lock_execucao() (nova
+   função, chamada logo no início de __main__, antes de qualquer janela
+   tkinter) confere se já existe lock de um PID ainda vivo - checagem via
+   ctypes.windll.kernel32.OpenProcess (API nativa do Windows, não usa
+   wmic/tasklist, evita depender de comando externo de novo) - se sim,
+   mostra aviso "DMS Site já está rodando" e sai (sys.exit(1)) sem abrir
+   nenhuma janela de seleção; se o lock for de um PID que já morreu (lock
+   órfão de um crash anterior), sobrescreve e segue normal.
+   liberar_lock_execucao() remove o lock ao final, num finally em volta de
+   automacao.executar() - libera mesmo se a execução terminar com erro.
+
+   NÃO foi possível confirmar de vez a causa raiz (dois processos) sem
+   acesso à 192.168.1.250 - só a correção defensiva foi aplicada. Se
+   acontecer de novo mesmo com o lock (deveria aparecer o aviso "já está
+   rodando" em vez da janela de seleção reaparecer), é sinal de que a
+   hipótese estava errada e precisa investigar por outro ângulo (ex: pedir
+   pro usuário conferir no Gerenciador de Tarefas quantos DMS_Site.exe
+   aparecem quando o problema ocorrer).
+
+   PENDÊNCIA: essa mesma lacuna (proteção "já rodando" só por sessão
+   Streamlit) existe igualzinho nos outros 4 sistemas do launcher (Gerar
+   CND, REST Site, SEFAZ Site, Malha Fina) - só o DMS_Site.py ganhou o
+   lock de arquivo por ser o que apresentou o sintoma. Replicar o mesmo
+   padrão (obter_lock_execucao/liberar_lock_execucao, lock em pasta de
+   saída fixa de cada sistema) nos outros 4 se o mesmo problema aparecer
+   lá.
+
+RECOMPILADO (mesmo comando da seção 25/21) com as duas correções acima.
+PENDENTE (ação do usuário, mesma da seção 25): copiar dist\DMS_Site\ pra
+D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\EXECUSSÕES\PREFEITURA\dist\DMS_Site\ via
+Área de Trabalho Remota.
+
+------------------------------------------------------------------------
+27) BUG SISTÊMICO: LOG AO VIVO DO PAINEL FICAVA VAZIO EM TODOS OS 5
+    SISTEMAS COMPILADOS (20/08/2026, mesmo dia)
+------------------------------------------------------------------------
+Usuário mandou print de um teste real na 192.168.1.250: janela "Selecionar
+Empresas" aberta com as 353 empresas marcadas, mas o log do painel mostrava
+"DMS Site — 🟢 rodando..." com "(sem saída ainda)" - nenhuma linha, mesmo
+com o processo claramente rodando (a janela tkinter já estava na tela, o
+que só acontece depois de vários prints). Suspeita do usuário: talvez o
+Chrome estivesse rodando oculto (headless) - conferido no código, NÃO tem
+opção headless em lugar nenhum de DMS_Site.py, o Chrome deveria abrir
+visível normalmente com --start-maximized.
+
+Causa raiz real, achada investigando o mecanismo de buffering: antes da
+migração pra .exe (seção 21), o launcher chamava
+`[sys.executable, "-u", caminho]` - a flag `-u` desligava totalmente o
+buffer do Python, garantindo que cada print() saísse imediatamente pelo
+pipe que o launcher lê. Depois da migração, o Popen passou a ser só
+`[caminho]` (o .exe direto, sem sys.executable) - não tem como passar "-u"
+pra um executável standalone. Sem isso, como a saída vai por PIPE (não é
+terminal), o Python volta ao comportamento padrão de BUFFER EM BLOCO
+(alguns KB) em vez de buffer por linha - os print() ficam represados no
+processo e só chegam no painel quando o buffer enche ou o processo
+termina. Isso explica tanto o "(sem saída ainda)" quanto a suspeita
+"reabrindo a janela" da seção 26: o usuário esperava, via o log vazio,
+achava que não tinha funcionado, e clicava em Executar de novo - lançando
+um SEGUNDO processo (cujo lock, se já tivesse sido implantado, teria
+bloqueado - mas o usuário ainda não tinha reimplantado o DMS_Site.exe da
+seção 26 quando isso foi visto).
+
+Esse bug é SISTÊMICO - afeta os 5 sistemas que o launcher chama direto
+(não só DMS), porque todos perderam o "-u" na mesma migração. Corrigido
+nos 5 pontos de entrada (mesmo bloco de reconfigure de encoding que já
+existia em cada um, já documentado na seção 23a, só acrescentando
+line_buffering=True):
+  - PREFEITURA\DMS_Site.py
+  - PREFEITURA\REST_Site.py
+  - CND MUNICIPAL\Gerar_CND.py
+  - SEFAZ AUTOMAÇÃO\SEFAZ_Site.py
+  - MALHA FINA SEFAZ\Malha_Fina.py
+Os 5 CND_*.py de município (chamados via subprocess.run pelo Gerar_CND.exe,
+não diretamente pelo launcher) e os 3 Emissao_*.py de EMITIR NOTAS (não
+usam o log ao vivo do painel dessa forma) NÃO foram mexidos - fora do
+sintoma relatado, sinalizar se precisar no futuro.
+
+Todos os 5 recompilados (mesmos comandos da seção 21). Durante a
+recompilação, o build do Gerar_CND.exe falhou 2x com
+"PermissionError: Acesso negado" tentando apagar arquivos dentro de
+dist\Gerar_CND\_internal\ (pastas diferentes a cada tentativa: bcrypt,
+depois certifi) - sintoma de o OneDrive estar sincronizando ativamente
+aqueles arquivos no momento do build, segurando handle. Contornado
+apagando a pasta dist\Gerar_CND\ inteira manualmente antes de rodar o
+PyInstaller de novo (mesma pasta apagada preventivamente nos outros 3
+antes de compilar, pra evitar o mesmo problema). Não é um bug de código -
+só uma corrida com a sincronização do OneDrive nesta máquina de dev; se
+acontecer nesta pasta de novo, apagar a pasta dist\<sistema>\ antiga à mão
+antes de rodar o PyInstaller costuma resolver.
+
+PENDENTE (ação do usuário): copiar as 4 pastas dist\ recompiladas (além do
+dist\DMS_Site\ da seção 26) pra dentro de D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\
+EXECUSSÕES\ na 192.168.1.250, nos mesmos subcaminhos de sempre (ver seção
+22 - CND MUNICIPAL\dist\Gerar_CND\, PREFEITURA\dist\REST_Site\, SEFAZ
+AUTOMAÇÃO\dist\SEFAZ_Site\, MALHA FINA SEFAZ\dist\Malha_Fina\), via Área
+de Trabalho Remota.
+
+------------------------------------------------------------------------
+28) DMS Site: PROCESSO TRAVANDO "PRA SEMPRE" SEM ABRIR O CHROME
+    (20/08/2026, mesmo dia - usuário pediu pra focar só em DMS por
+    enquanto, os outros 4 sistemas ficam com as correções da seção 27 mas
+    sem investigação adicional por ora)
+------------------------------------------------------------------------
+Usuário testou de novo depois das correções das seções 25-27 e reportou
+que NÃO resolveu: Chrome continua não abrindo, o log continua marcando
+"rodando" por HORAS, e depois de um tempo a janela de seleção de empresas
+volta a aparecer. Não ficou confirmado se o .exe novo (com as correções já
+feitas) chegou a ser copiado pra D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\
+EXECUSSÕES\PREFEITURA\dist\DMS_Site\ na 192.168.1.250 antes desse teste -
+combinado que é assunto pra próxima resposta do usuário, não repetir a
+pergunta toda hora.
+
+Independente disso, achado um problema real e concreto no código: a
+chamada uc.Chrome(...) dentro de configurar_driver() não tinha timeout
+nenhum - se o undetected_chromedriver travar tentando abrir o Chrome (ex:
+sem saída de internet nessa máquina pra baixar o chromedriver certo na
+primeira vez, algum firewall/antivírus bloqueando o processo do Chrome, ou
+qualquer outro motivo), a chamada ficava esperando literalmente pra
+sempre - o processo ficava "rodando" no painel indefinidamente, sem nunca
+abrir o Chrome nem reportar erro nenhum. Isso bate 100% com o sintoma "fica
+em execução por toda vida, sem nem abrir o Chrome".
+
+Corrigido: uc.Chrome(...) agora roda dentro de uma thread separada
+(daemon=True) com timeout de 120s (thread_chrome.join(timeout=120)). Se
+não responder nesse prazo, imprime um erro claro apontando as suspeitas
+mais prováveis (falta de internet/firewall bloqueando o download do
+chromedriver na primeira vez, ou o Chrome não conseguindo abrir por outro
+motivo) e desiste dessa tentativa (self.driver = None, comportamento já
+tratado pelo resto do código - pula esse município). Antes disso não
+existia NENHUM timeout em lugar nenhum do fluxo de abrir o navegador -
+esse era o único ponto realmente capaz de travar o processo "pra sempre"
+sem gerar log nenhum.
+
+Isso NÃO explica sozinho por que a janela de seleção "volta a aparecer" -
+o lock de arquivo da seção 26 já deveria ter impedido um segundo processo
+de abrir uma segunda janela (mostraria "DMS Site já está rodando" em vez
+disso). Se isso continuar acontecendo mesmo depois de: (1) confirmar que o
+.exe novo foi mesmo copiado pra rede, e (2) o timeout de 120s realmente
+entrar em ação e devolver controle pro loop de municípios - vale suspeitar
+do lock em si (ex: se o usuário estiver rodando de DUAS máquinas/sessões
+RDP diferentes que enxergam a MESMA C:\PREFEITURA\DMS só que uma delas na
+verdade é um disco diferente, ou se o antivírus tiver algum sandboxing que
+isola o caminho do lock por processo) - precisa reproduzir com o .exe já
+atualizado pra investigar mais fundo.
+
+RECOMPILADO só o DMS_Site.exe (comando de sempre). PENDENTE (ação do
+usuário): copiar dist\DMS_Site\ pra rede de novo, substituindo o anterior.
+
+ATUALIZAÇÃO (mesmo dia, depois): usuário confirmou ter copiado certo
+(D:\...\PREFEITURA\dist\DMS_Site\DMS_Site.exe) e mandou log novo - dessa
+vez o log AO VIVO já funcionou (mostrou baixar empresas, seleção
+confirmada, datas definidas, "Configurando navegador...", "Chrome versão
+detectada: 151", "Abrindo o Chrome... até 120s") - progresso real da
+correção da seção 27. Mas o log também mostrou "📁 Pasta criada:
+C:\PREFEITURA\DMS\Prints" (que só é impresso dentro de criar_pastas(), no
+__init__, ou seja, deveria ter sido a PRIMEIRA linha do log) aparecendo
+DEPOIS de "Abrindo o Chrome" - sinal de que o line_buffering=True sozinho
+não estava garantindo flush imediato pro pipe dentro do .exe compilado em
+todas as situações. Reforçado com uma segunda camada: print() foi
+redefinido no topo do arquivo (logo após o bloco de reconfigure) pra
+sempre passar flush=True, garantia mais forte e independente de qualquer
+configuração de buffering do stream. RECOMPILADO de novo.
+
+O processo em si parou de mostrar progresso logo depois de "Abrindo o
+Chrome..." - usuário reportou "Não consegue abrir o Chrome", mas o log
+colado não mostrava nem a mensagem de sucesso nem a de timeout (120s, ver
+correção anterior desta seção) - possível que o log tenha sido copiado
+ainda DENTRO da janela de 120s de espera, antes do timeout disparar.
+PENDENTE: usuário reimplantar esta última versão e, da próxima vez, dar
+tempo de até 2 minutos depois de "Abrindo o Chrome..." antes de concluir
+que travou, conferindo se aparece a mensagem de timeout ou se o Chrome
+realmente abre. Se o timeout disparar de verdade, a suspeita mais provável
+continua sendo falta de acesso à internet (não só à rede local) nesta
+máquina para o undetected_chromedriver baixar o chromedriver compatível na
+primeira execução - vale confirmar se a 192.168.1.250 tem saída de
+internet livre.
+
+ATUALIZAÇÃO (mesmo dia, depois) - ACHADA A CAUSA REAL: usuário reimplantou
+e mandou log novo - dessa vez ficou claro que NÃO era mensagem de timeout
+nem reordenação de buffer: o bloco inteiro "="*50 / "🚀 INICIANDO AUTOMAÇÃO
+DMS SITE 🚀" / "="*50 / "📊 Baixando empresas..." aparece REPETIDO, do zero,
+dentro do MESMO log contínuo, logo depois de "Abrindo o Chrome... até
+120s". Conferido no código: executar() só imprime esse banner UMA vez, não
+tem loop nem recursão nenhuma que volte pra lá - a única forma de ver esse
+bloco duas vezes na mesma captura de stdout é o PRÓPRIO .exe se relançando
+como um processo NOVO que herda o mesmo pipe/stdout do processo original
+(e por isso aparece misturado no mesmo log, não como uma execução
+separada).
+
+Causa identificada: bug clássico e bem documentado do PyInstaller com o
+módulo `multiprocessing` no Windows. O build deste .exe empacota
+pandas/numpy/pyarrow (hooks confirmados no log de build) - se QUALQUER
+coisa nessas bibliotecas (ou em qualquer outra dependência) acionar o
+método "spawn" do multiprocessing em algum momento, no Windows isso
+funciona relançando o PRÓPRIO executável como um novo processo com
+argumentos especiais - e sem `multiprocessing.freeze_support()` chamado
+logo no início do `if __name__ == "__main__":`, esse processo relançado
+NÃO reconhece que deveria só rodar uma tarefa interna: ele executa TODO o
+script do zero de novo, banner e tudo, exatamente o sintoma visto. A
+documentação oficial do Python é explícita sobre isso ser obrigatório em
+qualquer app congelado (PyInstaller/cx_Freeze/py2exe) que possa vir a usar
+multiprocessing, direta ou indiretamente.
+
+Corrigido: `multiprocessing.freeze_support()` chamado como a PRIMEIRÍSSIMA
+linha dentro de `if __name__ == "__main__":`, antes até do lock de
+execução (que também acrescentou um print do PID logo em seguida, como
+diagnóstico extra pra confirmar de vez se isso se repetir). RECOMPILADO.
+Teste de fumaça local (nesta máquina de dev, sem sessão de desktop
+interativa real disponível pro ambiente onde a compilação/teste rodou -
+não valida o fluxo completo até o Chrome abrir) confirmou só 1 processo
+DMS_Site.exe na lista de tarefas depois de alguns segundos rodando - não
+duplicou, consistente com a correção, mas não é prova definitiva sem
+testar na 192.168.1.250 de verdade.
+
+PENDENTE (ação do usuário): copiar dist\DMS_Site\ pra rede de novo
+(mesmo caminho de sempre) e testar. Se o PID no log aparecer só uma vez e
+o Chrome realmente abrir dessa vez, confirma a causa. Se o mesmo bloco
+duplicado aparecer de novo mesmo assim, o print do PID vai mostrar se são
+dois PIDs diferentes (relançamento) ou o mesmo (outra causa ainda não
+identificada) - me mandar o log completo dessa vez, com o PID incluído.
+
+CONFIRMADO PELO USUÁRIO (mesmo dia, depois): o freeze_support() resolveu -
+DMS Site funcionando de ponta a ponta na 192.168.1.250.
+
+------------------------------------------------------------------------
+29) MESMAS CORREÇÕES PORTADAS PRA REST_Site.py (20/08/2026, mesmo dia)
+------------------------------------------------------------------------
+Usuário pediu pra conferir se REST_Site.py (PREFEITURA\REST_Site.py, fonte
+do REST Site) tinha os mesmos problemas do DMS. Auditoria encontrou quase
+todos os mesmos bugs (menos o do caminho hardcoded "C:\Users\luann" da
+seção 25, que já não existia aqui - conferido de novo, confirmado limpo) -
+MAIS um bug próprio que o DMS não tinha:
+
+a) VERSÃO DO CHROME HARDCODED (bug próprio deste arquivo, mais grave que
+   os outros porque JÁ QUEBRA sozinho, não depende de nenhum outro
+   problema de ambiente): as duas chamadas uc.Chrome() do arquivo
+   (configurar_driver() e configurar_driver_download(), este último usado
+   pra trocar de driver na hora de baixar a guia DUAM) tinham
+   version_main fixo NA MÃO - 150 numa função, 144 na outra (nem batiam
+   entre si). Isso quebra assim que o Chrome de verdade instalado na
+   máquina de destino for outra versão (ex: 151, já confirmado na
+   192.168.1.250 pelos testes do DMS) - undetected_chromedriver tentaria
+   casar com uma versão de chromedriver que não existe/não bate,
+   provavelmente SessionNotCreatedException. Corrigido: portada a mesma
+   obter_versao_chrome() (detecção dinâmica via subpasta versionada de
+   Application\, wmic só como fallback) já usada em DMS_Site.py/CND_*.py,
+   e as duas chamadas passaram a usar essa versão detectada em vez do
+   número fixo.
+
+b) SEM TIMEOUT ao abrir o Chrome (mesmo bug da seção 28): nenhuma das duas
+   chamadas uc.Chrome() tinha proteção contra travar pra sempre. Corrigido
+   com uma função helper nova, _abrir_chrome_com_timeout(options,
+   timeout=120) (thread separada + join com timeout, levanta TimeoutError
+   se travar) - reaproveitada pelas duas funções (configurar_driver E
+   configurar_driver_download), já que os dois métodos tinham a mesma
+   lógica duplicada. Diferente de DMS_Site.py, aqui os métodos não tinham
+   try/except próprio - a exceção (TimeoutError ou qualquer erro real do
+   Chrome) sobe pros try/except que já existiam nos CHAMADORES (linha
+   ~2333 pro fluxo principal, ~1868 pro fluxo de troca de driver da guia
+   DUAM), que já tratavam erro normalmente - não precisou mudar esse
+   padrão.
+
+c) SEM multiprocessing.freeze_support() (mesmo bug da seção 28, mesma
+   causa - pandas empacotado): corrigido igual, chamado como primeiríssima
+   linha dentro de `if __name__ == "__main__":`, com print do PID logo
+   em seguida como diagnóstico.
+
+d) SEM lock de execução entre processos (mesma lacuna da seção 26):
+   portadas obter_lock_execucao()/liberar_lock_execucao(), mesmo padrão -
+   lock em C:\PREFEITURA\REST\.rest_site.lock (dentro de PASTA_PRINTS,
+   caminho fixo já usado por este arquivo). Diferença de implementação:
+   REST_Site.py já importa `psutil` (usado noutro lugar do arquivo), então
+   a checagem de PID vivo usa psutil.pid_exists() em vez do ctypes.
+   OpenProcess manual usado em DMS_Site.py (mesmo efeito, só evita
+   reinventar já que psutil já estava disponível aqui).
+
+e) LOG AO VIVO (linha_buffering) já tinha sido corrigido na seção 27 -
+   reforçado agora com a mesma camada extra de print(flush=True) via
+   redefinição do print no topo do módulo (mesmo reforço feito em
+   DMS_Site.py na seção 28, depois de reconfigure(line_buffering=True)
+   sozinho ter se mostrado insuficiente).
+
+NÃO MEXIDO (fora do escopo, notado só de passagem): existem DUAS
+definições do método criar_pastas() na classe ISSNetAutomacao (linhas
+~67 e ~75 do arquivo) - a segunda sobrescreve a primeira silenciosamente
+(só ela realmente roda, e inclui PASTA_DUAM que a primeira não tinha).
+Não é bug funcional agora (a versão que vale está certa), só código morto
+- sinalizar se algum dia for mexer nessa função de novo, pra não editar a
+cópia errada por engano.
+
+RECOMPILADO (mesmo comando de sempre, com os flags de selenium/undetected_
+chromedriver/reportlab/PIL._tkinter_finder). PENDENTE (ação do usuário):
+copiar dist\REST_Site\ pra D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\EXECUSSÕES\
+PREFEITURA\dist\REST_Site\ na 192.168.1.250 via Área de Trabalho Remota,
+substituindo o anterior.
+
+------------------------------------------------------------------------
+30) REST_Site.py: MIGRADO DE EXCEL LOCAL PRA PLANILHA DO SISTEMA
+    (20/08/2026, mesmo dia)
+------------------------------------------------------------------------
+Usuário testou o REST Site já com as correções da seção 29 e bateu num
+problema bem mais básico: o robô ainda tentava ler um Excel local fixo
+(C:\PREFEITURA\EMPRESAS - GOIÂNIA.xlsx) que já não existe/não é mais
+mantido - "❌ Erro: Arquivo não encontrado". Usuário confirmou: REST não
+usa mais planilha local nenhuma, tem que buscar da planilha do sistema
+igual o DMS Site já faz. Isso na verdade já estava DOCUMENTADO como feito
+na seção 6 deste arquivo ("CND/DMS/REST não editam mais um Excel local"),
+mas o código real do REST_Site.py nunca tinha sido migrado de fato -
+divergência entre a documentação e o código, sinal de que uma sessão
+anterior escreveu a intenção sem terminar a implementação neste arquivo
+específico.
+
+Migração feita, espelhando EXATAMENTE o padrão já usado em DMS_Site.py:
+  - Removido: PASTA_PLANILHA+NOME_PLANILHA+ABA_PLANILHA usados só pra
+    achar o Excel de empresas (PASTA_PLANILHA continua existindo, só que
+    agora só é usada pra achar seta_download.png do PyAutoGUI - não
+    mexida), self.df_empresas/self.caminho_planilha (não usados em mais
+    nada), e o método marcar_sem_acesso_excel() inteiro (escrevia "SEM
+    ACESSO" direto na coluna D do Excel local antigo, incompatível com a
+    nova fonte só-leitura).
+  - Adicionado: SHEET_ID/GOOGLE_SHEET_URL/SHEET_EMPRESAS (mesmo SHEET_ID
+    de sempre), _cnpj_digitos/_texto/normalizar/_trazer_para_frente
+    (helpers portados de DMS_Site.py), baixar_empresas_do_sistema()
+    (busca a GERAL via requests.get + pd.read_excel(BytesIO(...)),
+    filtra Situação=ATIVA + Município=GOIANIA - REST só atende Goiânia,
+    diferente do DMS que atende os dois municípios; a pendência antiga da
+    seção 7 sobre Aparecida de Goiânia no REST não foi mexida, fora do
+    escopo), tela_selecionar_empresas() (mesma janela tkinter com busca/
+    seleção do DMS, adaptada: mostra nome+CNPJ+código em vez de
+    nome+CNPJ+município já que só tem um município aqui).
+  - carregar_dados_excel() (nome do método mantido de propósito, é a
+    ÚNICA chamada existente em executar() - trocar o nome também exigiria
+    trocar o chamador sem ganho nenhum) agora baixa da planilha do sistema
+    + abre a tela de seleção, em vez de ler o Excel local. Continua
+    retornando True/False do mesmo jeito que antes, então o resto do
+    fluxo (executar()) não precisou mudar nada.
+  - marcar_sem_acesso_excel(index) virou marcar_observacao(cnpj, texto) -
+    mesmo padrão do DMS_Site.py (grava numa planilha de OBSERVAÇÕES local
+    separada, ARQUIVO_OBSERVACOES = C:\PREFEITURA\REST\
+    REST_Observacoes.xlsx, keyed por CNPJ em vez de número de linha do
+    Excel antigo, já que não existe mais linha fixa nenhuma). Único
+    chamador (salvar_print_erro()) atualizado.
+  - Cada empresa no dict agora tem 'nome' (Razão Social, novo - útil pra
+    reconhecer na tela de seleção) em vez de 'index' (removido - não
+    usado em mais nada depois da migração); 'cnpj'/'codigo'/'im' mantidos
+    com os mesmos nomes de chave, então o resto do código (processar_
+    empresa, gerar_pdf_sem_acesso, etc - todos usam só empresa['cnpj']/
+    empresa['codigo']) não precisou de nenhuma mudança.
+
+RECOMPILADO. PENDENTE (ação do usuário): copiar dist\REST_Site\ pra rede
+de novo (mesmo caminho da seção 29) e testar o fluxo completo agora com a
+planilha do sistema.
+
+CONFIRMADO PELO USUÁRIO (mesmo dia, depois): funcionou - 1 empresa de
+Goiânia processada com sucesso de ponta a ponta.
+
+------------------------------------------------------------------------
+31) REST_Site.py: MULTI-MUNICÍPIO DE VERDADE + FIM SEM TRAVAR
+    (20/08/2026, mesmo dia, depois do primeiro teste bem-sucedido)
+------------------------------------------------------------------------
+Dois pedidos do usuário depois de ver funcionar pra Goiânia:
+
+a) MULTI-MUNICÍPIO: a lista de empresas agora pode trazer tanto Goiânia
+   quanto Aparecida de Goiânia (a migração da seção 30 tinha ficado
+   filtrando só GOIANIA, deixado assim de propósito naquele momento pra
+   não crescer demais o escopo, mas o usuário quer os dois). Isso na
+   prática RESOLVE de vez a pendência antiga da seção 7 ("REST_Site.py:
+   URL_LOGIN pode não trocar corretamente para Aparecida de Goiânia, só
+   self.municipio muda") - a causa raiz sempre foi essa: URL_LOGIN era uma
+   constante ÚNICA fixa em Goiânia, nunca trocava; self.municipio só
+   influenciava um detalhe de formulário (valor do campo NFS-e), não a
+   URL de login. A tela de datas tinha inclusive um Radiobutton pra
+   escolher "Goiânia ou Aparecida" manualmente - mas isso nunca conectava
+   de fato com a URL, só alimentava aquele self.municipio.
+
+   Corrigido replicando o padrão que DMS_Site.py já usa pra isso
+   (URLS_LOGIN dict + self.empresas_por_municipio + loop por município em
+   executar()):
+     - URL_LOGIN (constante única) virou URLS_LOGIN = {"GOIANIA": ...,
+       "APARECIDA DE GOIANIA": ...} (URL de Aparecida nunca tinha sido
+       usada de verdade antes, só existia como ideia).
+     - baixar_empresas_do_sistema() agora aceita os dois municípios
+       (checa contra as chaves de URLS_LOGIN, igual ao DMS), e cada
+       empresa carrega seu próprio campo "municipio".
+     - tela_selecionar_empresas() mostra o município de cada empresa na
+       lista (antes só nome+CNPJ+código, já que só existia Goiânia).
+     - Removido o Radiobutton de município da tela de datas (não fazia
+       mais sentido perguntar manualmente - o município já vem de cada
+       empresa da planilha agora) - trocado por um aviso de uma linha
+       explicando isso.
+     - carregar_dados_excel() agrupa a seleção do usuário em
+       self.empresas_por_municipio (dict por município), igual ao DMS.
+     - acessar_site() passou a receber a URL como parâmetro (era só
+       URL_LOGIN direto) - chamada como self.acessar_site(URLS_LOGIN[
+       municipio]) dentro do novo loop.
+     - executar() reestruturado: um loop externo por município (`for
+       municipio, empresas_municipio in self.empresas_por_municipio.
+       items()`), abrindo um navegador NOVO e fazendo login separado pra
+       cada um (self.configurar_driver() + self.acessar_site(...) por
+       município, self.municipio_atual setado a cada grupo) - o loop
+       INTERNO de processar cada empresa (já existia) só passou a rodar
+       dentro desse loop externo, usando empresas_municipio em vez de
+       self.dados_empresas (removido, não usado em mais nada). self.
+       municipio (usado só pra decidir valor_nfse do formulário, 2 vs 7)
+       virou self.municipio_atual, comparado contra "APARECIDA DE
+       GOIANIA" (string normalizada, igual as chaves de URLS_LOGIN) em
+       vez de "aparecida".
+     - A segunda chamada de login (dentro do fluxo de troca de driver pra
+       baixar a guia DUAM, refaz login depois de trocar de driver) também
+       usava URL_LOGIN fixo - trocada pra URLS_LOGIN[self.municipio_atual].
+
+b) FIM DO PROCESSO TRAVANDO "PRA SEMPRE": achada a causa de "não fecha o
+   navegador, fica em execução" - o código tinha um
+   input("Pressione ENTER para fechar o navegador...") logo no final do
+   fluxo. Como este processo roda sem terminal interativo (lançado por
+   subprocess.Popen do painel Streamlit, stdin não conectado a ninguém
+   digitando), esse input() ficava esperando uma tecla que NUNCA chega -
+   o processo nunca terminava, o navegador nunca fechava, o painel
+   mostrava "rodando" pra sempre. Diferente dos bugs de travamento
+   anteriores (seção 28, timeout do Chrome / seção 28-29, freeze_support)
+   - aqui não era nem hang de biblioteca nem relançamento de processo, era
+   literalmente esperando entrada de teclado que não existe nesse
+   contexto.
+
+   Corrigido replicando mostrar_resumo_final() de DMS_Site.py: uma janela
+   Tkinter de resumo (municípios processados, empresas com/sem acesso,
+   pastas de resultado PDF/XML/DUAM, botão "Abrir Pasta de Resultados" e
+   "Fechar") exibida SEMPRE ao final de executar() (fora do try/except/
+   finally, pra aparecer mesmo se um erro crítico interromper o
+   processamento no meio) - o navegador já é fechado ANTES dessa tela
+   (self.driver.quit() no finally, ou ao final de cada município no loop
+   normal), então o problema principal (Chrome nunca fechando) fica
+   resolvido independente de alguém interagir com a janela final ou não.
+
+RECOMPILADO. Teste de fumaça local (mesmo ambiente sem sessão de desktop
+interativa das seções anteriores - não valida o fluxo completo): processo
+ficou vivo sem crashar por import faltando, mesmo padrão de sucesso já
+visto nos testes de fumaça anteriores. PENDENTE (ação do usuário): copiar
+dist\REST_Site\ pra rede de novo (mesmo caminho de sempre) e testar com
+empresas de Aparecida de Goiânia incluídas na seleção, além de conferir
+que a tela de resumo final aparece e o navegador fecha sozinho ao terminar.
+
+------------------------------------------------------------------------
+32) SEFAZ_Site.py (SEFAZ AUTOMAÇÃO): FILTRO DE IE + 4 PENDÊNCIAS
+    (20/08/2026 → 21/08/2026, mesmo fio, depois de DMS/REST confirmados)
+------------------------------------------------------------------------
+Usuário pediu pra conferir/corrigir o SEFAZ (motor "SEFAZ AUTOMAÇÃO", ver
+seção 9): filtro de empresas (só IE + GO), limpar pastas antes de rodar
+(opcional), print de tela salvo, criar pastas de saída, e tela Tkinter de
+conclusão igual aos outros.
+
+a) BUG REAL ACHADO NO FILTRO (não era só confirmar, tinha bug de verdade):
+   baixar_empresas_go() já filtrava Situação=ATIVA + Estado=GO (confirmado
+   contra a planilha ao vivo: coluna Estado tem valores limpos "GO"/"SP"/
+   etc, sem problema de comparação) - MAS o filtro de IE (`if not ie:
+   continue`) checava o TEXTO BRUTO da célula ANTES de limpar só os
+   dígitos. Conferido ao vivo contra a planilha: de 390 empresas ATIVA+GO,
+   192 tinham a IE preenchida com o texto "Não Encontrada" e mais 6 com
+   "NÃO POSSUI" - strings NÃO VAZIAS que passavam pelo filtro (só o
+   re.sub(r"\D","",ie) posterior é que zerava, tarde demais). Ou seja,
+   quase metade das empresas "aprovadas" pelo filtro na prática não tinham
+   IE nenhuma pro motor consultar. Corrigido: limpa os dígitos ANTES de
+   checar `if not ie`, então essas 198 empresas agora são excluídas de
+   verdade. Sobram ~175 empresas com IE numérica real.
+
+b) CRIAR PASTAS DE SAÍDA: já acontecia (config.py do motor já cria sozinho
+   DADOS/LOGS/DESCOBERTA/PASTA_ZIPS/PERFIL_CHROME/PASTA_PRINTS/
+   PASTA_ENTRADAS/PASTA_SAIDAS/PASTA_CANCELADAS_ENTRADAS/
+   PASTA_CANCELADAS_SAIDAS assim que é importado) - só que o `import
+   config` de verdade era TARDIO (só depois das duas telas, de propósito,
+   pra credenciais digitadas sobrescreverem config.USUARIO/SENHA).
+   Adicionado um segundo import (`import config as _config_pastas`) logo
+   no início de main(), só pelo efeito colateral do mkdir - reimportar
+   depois não reexecuta o módulo (cache do Python), não atrapalha o
+   motivo do import tardio original. Agora aparece no log, cedo, quais
+   pastas existem/foram criadas.
+
+c) TKINTER DE CONCLUSÃO: nova mostrar_resumo_final() (mesmo padrão visual
+   de DMS_Site.py/REST_Site.py) mostrando a competência, o resumo de
+   db.resumo(comp) (tarefas/lotes por estado, mesma tabela que já ia só
+   pro log) e as pastas de saída, com botão "Abrir Pasta de Entradas" e
+   "Fechar". Chamada sempre ao final de main(), depois do
+   worker.executar().
+
+d) LOCK DE EXECUÇÃO + freeze_support(): mesmo padrão aplicado aos outros 4
+   sistemas nesta sessão (obter_lock_execucao/liberar_lock_execucao via
+   PID + ctypes.OpenProcess, lock em C:\SEFAZ\LOG SEFAZ\.sefaz_site.lock;
+   multiprocessing.freeze_support() como primeiríssima linha do
+   `if __name__ == "__main__":`) - não foi pedido explicitamente desta
+   vez, aplicado por consistência (mesmo risco: pandas empacotado no
+   build, mesmo ponto cego de duas instâncias). Aqui importa MAIS que nos
+   outros: duas instâncias escrevendo ao mesmo tempo no MESMO banco
+   SQLite (config.DADOS\xml_go.db) poderiam corromper o estado das
+   tarefas, não só abrir uma segunda janela confusa.
+
+e) LIMPAR PASTAS ANTES DE RODAR (com ressalva importante, alinhada com o
+   usuário antes de implementar): o motor é resumível via BANCO SQLite,
+   não por arquivo em disco (documentado na seção 9: "não pede mais pra
+   limpar dados anteriores... esse conceito não existe mais" - decisão de
+   uma sessão anterior). Avisado ao usuário que só apagar arquivo sem
+   mexer no banco deixaria o motor "achando" que já processou tudo
+   (tarefa marcada PROCESSADA) e as pastas ficariam vazias pra sempre.
+   Usuário escolheu: limpar arquivos + resetar banco, só da competência
+   atual (não mexe em meses anteriores). Implementado como
+   limpar_saida_se_solicitado(comp, config, db): os nomes de arquivo/zip
+   já incluem a competência (confirmado no worker.py - padrão
+   "{codigo}_{competencia}_{direcao}_{conteudo}" pros ZIPs/XMLs extraídos,
+   "_{codigo}_{direcao} SEFAZ {competencia}.png" pros prints), então dá
+   pra filtrar com glob "*{comp}*" nas 5 pastas de saída sem tocar em
+   outros meses. Se achar arquivo(s), pergunta uma vez (messagebox); se
+   confirmado, apaga só esses arquivos E chama db.reabrir(comp,
+   tudo=True) (função que já existia pronta no motor, nunca usada por
+   este wrapper antes) - devolve tarefas/downloads dessa competência pro
+   estado PENDENTE, fazendo as 4 buscas rodarem de novo do zero. Chamada
+   entre criar_tarefas() e worker.executar().
+
+f) PRINT DE TELA "JÁ EXISTE MAS NÃO ESTÁ FUNCIONANDO": investigado -
+   portal.salvar_print() já é chamado pelo worker.py em toda consulta
+   (sucesso ou "sem resultados"), salvando em config.PASTA_PRINTS via
+   sessao.pagina.screenshot(). Erro é capturado e só vai pro log.warn
+   (nunca propaga) - se estiver falhando, a causa fica só num
+   "! não consegui salvar o print: {erro}" no log, sem mais contexto.
+   NÃO INVESTIGADO A FUNDO NEM CORRIGIDO NESTA SESSÃO: usuário confirmou
+   que é esse mesmo mecanismo (não queria um novo), só disse que "não
+   está funcionando" - sem log de uma execução real com esse sintoma
+   (precisa de login de verdade no SEFAZ pra reproduzir, motor delicado
+   já testado em produção, não é seguro adivinhar a causa sem evidência).
+   PENDENTE: próxima vez que isso acontecer, pedir pro usuário colar o
+   trecho do log em disco (C:\SEFAZ\LOG SEFAZ\SEFAZ_*.log) em volta de
+   "não consegui salvar o print" (a mensagem de erro real do Playwright
+   vem depois de "{e}" nesse log.warn) - só com a mensagem de exceção de
+   verdade dá pra saber se é sessao.pagina None/fechada, timeout do
+   screenshot, ou outra coisa.
+
+RECOMPILADO (mesmo comando --collect-all playwright de sempre). Teste de
+fumaça local (mesma ressalva das seções anteriores - sem sessão de
+desktop interativa neste ambiente, não valida login/consulta real):
+processo ficou vivo sem crashar por import faltando. PENDENTE (ação do
+usuário): copiar dist\SEFAZ_Site\ pra D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\
+EXECUSSÕES\SEFAZ AUTOMAÇÃO\dist\SEFAZ_Site\ na 192.168.1.250 via Área de
+Trabalho Remota, testar de ponta a ponta, e se o print continuar falhando
+mandar o trecho do log em disco com a mensagem de erro real.

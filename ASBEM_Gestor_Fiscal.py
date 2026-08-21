@@ -47,22 +47,14 @@ SHEET_MSG_ABA    = "MENSAGEM"
 
 CERT_DATA_FILE = Path(os.path.abspath(__file__)).parent / "cert_data.json"
 
-# Endereço do launcher "ASBEM_Exectar_Sistemas.py" — Streamlit próprio, autohospedado
-# NA MÁQUINA DO ESCRITÓRIO (IP fixo na rede local), NUNCA na nuvem: este painel
-# (ASBEM_Gestor_Fiscal.py) roda no Streamlit Community Cloud, sem acesso à pasta de
-# rede D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\EXECUSSÕES\ nem como iniciar processo em
-# máquina de fora — por isso o botão abaixo só REDIRECIONA (o navegador de quem
-# clicou é quem precisa estar na rede do escritório pra alcançar esse IP), não tenta
-# subir o launcher sozinho. Antes de usar, o launcher precisa estar rodando manualmente
-# nessa máquina (streamlit run ASBEM_Exectar_Sistemas.py --server.port 8502).
-EXECUTAR_SISTEMAS_HOST = "192.168.1.250"
-EXECUTAR_SISTEMAS_PORT = 8502
-EXECUTAR_SISTEMAS_URL  = f"http://{EXECUTAR_SISTEMAS_HOST}:{EXECUTAR_SISTEMAS_PORT}"
-
-
-def _abrir_executar_sistemas():
-    st.markdown(f"<meta http-equiv='refresh' content='0; url={EXECUTAR_SISTEMAS_URL}'>",
-                unsafe_allow_html=True)
+# ATUALIZADO 21/08/2026: o botão "EXECUTAR SISTEMAS" deixou de redirecionar pro
+# painel central (192.168.1.250:8502) — aquele servidor dependia da máquina do
+# escritório estar de pé E da rede/firewall deixar cada PC de usuário alcançar
+# esse IP, o que não estava funcionando na prática. Agora o botão baixa o
+# Executar_Sistemas_Local.bat: cada usuário roda esse arquivo direto na própria
+# máquina, sem depender de servidor nenhum — o .bat acha sozinho a pasta de
+# rede compartilhada (letra de unidade varia por PC) e abre o .exe local.
+EXECUTAR_SISTEMAS_BAT = Path(os.path.abspath(__file__)).parent / "Executar_Sistemas_Local.bat"
 
 # ============================================================================
 # CSS E ESTILOS
@@ -1002,8 +994,14 @@ def tela_menu_principal():
 
     with col5:
         st.markdown('<div class="menu-btn">', unsafe_allow_html=True)
-        if st.button("🖥️ EXECUTAR SISTEMAS", use_container_width=True, key="btn_executar_sistemas"):
-            _abrir_executar_sistemas()
+        st.download_button(
+            "🖥️ EXECUTAR SISTEMAS",
+            data=EXECUTAR_SISTEMAS_BAT.read_bytes(),
+            file_name="Executar_Sistemas_Local.bat",
+            mime="application/bat",
+            use_container_width=True,
+            key="btn_executar_sistemas",
+        )
         st.markdown('</div>', unsafe_allow_html=True)
 
 if st.session_state["menu_area"] is None:
