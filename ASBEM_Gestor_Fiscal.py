@@ -5,7 +5,7 @@
 
 import streamlit as st
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from io import BytesIO, StringIO
 import requests
 import time
@@ -1888,6 +1888,30 @@ def pagina_situacao_fiscal_dashboard():
             _modal_sf_nao_concluidas(df_nc)
 
 
+# Apps Script ISOLADO (só leitura no Drive, não grava em nada) que devolve o
+# link do PDF mais recente de SITUAÇÃO FISCAL de cada empresa, casando pelo
+# Código embutido no nome do arquivo ("_<código>_SITUAÇÃO FISCAL MM-AAAA.pdf").
+# Fica vazia até publicar apps_script_pdf_situacao_fiscal.gs e colar a URL aqui
+# (mesmo padrão de placeholder já usado em APPS_SCRIPT_CLI_FORNEC_URL) - até lá
+# a lupa simplesmente não aparece na tabela, a página não quebra.
+APPS_SCRIPT_PDF_SITUACAO_FISCAL_URL = "https://script.google.com/macros/s/AKfycbz7FnVmU0-39_HszitoisrnNZ60fNpVVSXH55m3ufxoPmWEzj5uEy6Gsx9G87WiesXi/exec"
+
+
+@st.cache_data(ttl=600)
+def _busca_links_pdf_situacao_fiscal():
+    """Busca no Apps Script {código: link do PDF} de SITUAÇÃO FISCAL. Retorna {}
+    (silenciosamente) se a URL não estiver configurada ou a chamada falhar."""
+    if not APPS_SCRIPT_PDF_SITUACAO_FISCAL_URL:
+        return {}
+    try:
+        resp = requests.get(APPS_SCRIPT_PDF_SITUACAO_FISCAL_URL, timeout=20)
+        resp.raise_for_status()
+        dados = resp.json()
+        return {str(k).strip(): str(v).strip() for k, v in dados.items()}
+    except Exception:
+        return {}
+
+
 def pagina_situacao_fiscal_empresas():
     st.empty()
 
@@ -1999,11 +2023,51 @@ def pagina_situacao_fiscal_empresas():
     colunas_exibir = [c for c in colunas_exibir if c in df_filtrado.columns]
     df_tabela = _sanitiza_df(df_filtrado[colunas_exibir])
 
+    # ── lupa por empresa: PDF vem de uma pasta do Drive (sistema roda na nuvem do
+    # ── Streamlit, sem acesso a disco/rede local — só dá pra abrir arquivo por URL) ──
+    links_pdf = _busca_links_pdf_situacao_fiscal()
+    df_tabela["PDF"] = df_tabela["Código"].map(links_pdf).fillna("") if links_pdf else ""
+
     # ── a chave do grid muda conforme o filtro — o AgGrid usa reload_data=False,
     # ── então com uma chave fixa ele ignora dados novos e mantém a lista antiga ──
     filtro_estado = "|".join([status_sel or "todos"] + sorted(situacoes_sel))
     grid_key = f"grid_situacao_fiscal_{abs(hash(filtro_estado))}"
-    exibe_aggrid(df_tabela, height=450, grid_key=grid_key)
+
+    gb = GridOptionsBuilder.from_dataframe(df_tabela)
+    gb.configure_default_column(filter=True, sortable=True, editable=False, resizable=True)
+    for col in df_tabela.columns:
+        if col == "PDF":
+            continue
+        gb.configure_column(col, filter="agTextColumnFilter")
+
+    lupa_renderer = JsCode("""
+        function(params) {
+            if (!params.value) { return ''; }
+            return '<a href="' + params.value + '" target="_blank" rel="noopener" ' +
+                   'style="font-size:18px; text-decoration:none;" title="Abrir PDF">🔎</a>';
+        }
+    """)
+    gb.configure_column("PDF", header_name="", cellRenderer=lupa_renderer,
+                         filter=False, sortable=False, resizable=False,
+                         width=56, pinned="left", cellStyle={"textAlign": "center"})
+
+    gb.configure_grid_options(
+        domLayout="normal", floatingFilter=True, headerHeight=40, rowHeight=30,
+        enableBrowserTooltips=True, enableCellTextSelection=True, suppressMenuHide=True,
+        localeText={
+            'filterOoo': 'Filtrar...', 'contains': 'Contém', 'notContains': 'Não contém',
+            'equals': 'Igual', 'notEqual': 'Diferente', 'blank': 'Em branco',
+            'notBlank': 'Não em branco', 'noRowsToShow': 'Nenhum registro para mostrar',
+        }
+    )
+    AgGrid(df_tabela, gridOptions=gb.build(), height=450, key=grid_key,
+           fit_columns_on_grid_load=True, enable_enterprise_modules=False,
+           allow_unsafe_jscode=True, reload_data=False)
+
+    if not links_pdf:
+        st.caption("🔎 Lupa de PDF ainda não configurada — falta publicar "
+                   "apps_script_pdf_situacao_fiscal.gs e preencher "
+                   "APPS_SCRIPT_PDF_SITUACAO_FISCAL_URL.")
 
     output = BytesIO()
     df_tabela.to_excel(output, index=False)

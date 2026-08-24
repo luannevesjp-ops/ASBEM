@@ -1,5 +1,5 @@
 ============================================================================
-RESUMO DO SISTEMA - LUATECH / ASBEM (atualizado em 20/08/2026)
+RESUMO DO SISTEMA - LUATECH / ASBEM (atualizado em 24/08/2026)
 ============================================================================
 Leia este arquivo inteiro antes de mexer em qualquer parte deste sistema.
 
@@ -2204,3 +2204,207 @@ usuário): copiar dist\SEFAZ_Site\ pra D:\ONEDRIVE\AUTOMAÇÃO\PROGRAMAS\
 EXECUSSÕES\SEFAZ AUTOMAÇÃO\dist\SEFAZ_Site\ na 192.168.1.250 via Área de
 Trabalho Remota, testar de ponta a ponta, e se o print continuar falhando
 mandar o trecho do log em disco com a mensagem de erro real.
+
+------------------------------------------------------------------------
+33) NOVO DEPARTAMENTO "SITUAÇÃO FISCAL" NO GESTOR FISCAL (23/08/2026 →
+    24/08/2026, mesmo fio, 4 pedidos seguidos do usuário)
+------------------------------------------------------------------------
+Pedido inicial: trazer os dados da aba "SITUAÇÃO FISCAL" da planilha GERAL
+pro ASBEM_Gestor_Fiscal.py. Puramente LEITURA - sem Apps Script, sem
+escrita na planilha, então nenhuma das cautelas de
+[[user-feedback-cnpj-and-sheet-safety]] sobre write-path se aplica aqui.
+
+a) VIROU DEPARTAMENTO PRÓPRIO, NÃO MENU DENTRO DO FISCAL: primeira versão
+   colocou "SITUAÇÃO FISCAL" e "CAIXA POSTAL" como itens de menu dentro da
+   área FISCAL (ao lado de SIMPLES NACIONAL, REINF etc). Usuário corrigiu:
+   é um Departamento separado, no mesmo nível de FISCAL/PARALEGAL/
+   CONTÁBIL/CERTIFICADO DIGITAL (novo botão na tela "Selecione a Área",
+   tela_menu_principal() - subiu de st.columns(5) pra st.columns(6)). Tem
+   seu próprio menu lateral com 3 páginas: DASHBOARD, EMPRESAS, CAIXA
+   POSTAL (paginas_disponiveis quando menu_area=="SITUAÇÃO FISCAL").
+   Como "EMPRESAS" e "DASHBOARD" já são nomes de página usados por outras
+   áreas (pagina_empresas() no FISCAL/PARALEGAL/CONTÁBIL,
+   pagina_dashboard_paralegal() no PARALEGAL), o roteamento no final do
+   arquivo teve que virar CIENTE DA ÁREA: checa
+   st.session_state["menu_area"]=="SITUAÇÃO FISCAL" ANTES dos elif
+   genéricos de "EMPRESAS"/"DASHBOARD", senão a página errada abria.
+
+b) ESTRUTURA DA ABA "SITUAÇÃO FISCAL" (~51 colunas, ~410 linhas) - achado
+   direto lendo a planilha ao vivo, layout NADA óbvio:
+   - Colunas A-D (CÓDIGO BASE, RAZÃO SOCIAL, REGIME, RODOU) = lista de
+     empresas, ~409 linhas únicas por Código.
+   - Coluna E vazia (header "COLCAR COLUNA D", lixo, ignorada).
+   - Colunas F-L (CÓDIGO, CNPJ, COMPETÊNCIA, STATUS, DETALHE, ARQUIVO,
+     DATA/HORA) = log da LEITURA da situação fiscal, ~410 linhas - E NÃO
+     SÃO AS MESMAS LINHAS DAS EMPRESAS (A-D). É preciso um PROCV/merge
+     pelo Código pra juntar os dois blocos - não dá pra usar a linha
+     direto. Coluna K (ARQUIVO) fica de fora da exibição (pedido
+     explícito do usuário). A coluna H (COMPETÊNCIA) na prática é usada
+     como "mês da leitura" (data do dia em que a situação fiscal foi
+     baixada), não uma competência de declaração - por pedido do usuário
+     é rotulada "Mês de Leitura" na UI em vez de "Competência".
+   - Colunas M-T = CAIXA POSTAL 1 a 8 (até 8 mensagens por empresa) -
+     viraram página própria, nunca aparecem no grid de EMPRESAS.
+   - Colunas U em diante (31 colunas: SEM PENDÊNCIA, DÉBITO (SIEF),
+     OMISSÃO DE DCTF, PARCELAMENTO..., PROCESSO FISCAL... etc) = uma
+     coluna por assunto fiscal, célula = "X" quando a empresa tem aquele
+     item. Achado no meio do caminho: a última coluna (AY, "PROCESSO
+     FISCAL (SIEF)") tem o MESMO NOME da penúltima (AX) - duplicata real
+     na planilha, não bug nosso; o pandas resolve sozinho renomeando a
+     segunda pra "...(SIEF).1" na leitura.
+   Toda essa lógica (ler a aba, separar os blocos por POSIÇÃO de coluna -
+   não por nome, robusto a coluna renomeada -, normalizar Código com
+   _limpa_codigo_sf() e fazer o merge) ficou centralizada em
+   _carrega_situacao_fiscal(), reaproveitada pelas páginas DASHBOARD e
+   EMPRESAS pra não duplicar a lógica de junção.
+
+c) TRÊS PÁGINAS:
+   - DASHBOARD (pagina_situacao_fiscal_dashboard): rosca Concluída/Não
+     Concluída no MESMO padrão visual de pagina_simples() (SIMPLES
+     NACIONAL) - cores, hole=0.68, cartões de contagem, botão "Ver
+     empresas não concluídas". Classificação usa a coluna RODOU (bloco
+     A-D): contém "BAIXADO" = Concluída, senão Não Concluída (cobre
+     "ERRO" e vazio).
+   - EMPRESAS (pagina_situacao_fiscal_empresas): tabela enxuta (Código,
+     Razão Social, Regime, CNPJ, Mês Leitura, Status, Data/Hora, Situação
+     Leitura, Situações) + filtros acima do grid. NÃO lista as 31 colunas
+     de situação como colunas do grid (1ª versão fazia isso e o usuário
+     reclamou "ficou muito ruim, lista tudo amontoado") - viraram filtro,
+     e uma coluna "Situações" resume (join " · ") o que está marcado com
+     X em cada linha.
+   - CAIXA POSTAL (pagina_caixa_postal): Código, Razão Social, CNPJ, Qtd.
+     Mensagens, Mensagens. As 8 colunas M-T têm nomes de ARQUIVO como
+     conteúdo (ex: "_127_Opção pelo Simples Nacional em SETEMBRO de
+     2026.png"), às vezes MAIS DE UM arquivo na mesma célula, separados
+     por " | " (achado real na planilha, não hipotético - uma empresa com
+     4 arquivos concatenados numa célula só). _extrai_mensagens_caixa_
+     postal() faz o split, tira o prefixo "_<código>_" e a extensão.
+
+d) FILTROS EM BOTÃO (st.pills) EM VEZ DE COLUNA POR ASSUNTO - pedido
+   explícito do usuário, com 2 rodadas de ajuste:
+   - EMPRESAS: "Status da leitura" (pills single: Concluída/Não
+     Concluída) fica como estava. As 31 colunas de situação NÃO viraram
+     31 botões (usuário reclamou de novo: "grande número de botões") -
+     viraram 4 LISTAS (st.multiselect, "tipo validação de dados") por
+     prefixo do nome da coluna: OMISSÕES (8), PARCELAMENTOS (8), DÉBITOS
+     (3), DEMAIS (12 - tudo que não começa com OMISSÃO/PARCELAMENTO/
+     DÉBITO: SEM PENDÊNCIA, INSCRIÇÃO..., PROCESSO FISCAL..., etc),
+     cada opção mostrando a contagem "(N)" via format_func, filtro OU
+     entre tudo que for marcado (em qualquer uma das 4 listas).
+   - CAIXA POSTAL: 1ª versão criava um botão de assunto POR NÚMERO DE
+     INTIMAÇÃO ("Painel de Conformidade - Intimação nº 19986101", "...nº
+     19695853" etc como botões diferentes) - usuário pediu pra agrupar
+     num botão só. _extrai_mensagens_caixa_postal() ganhou um regex a
+     mais (`\s*n[ºo°]\s*\d+\s*$`) que tira o "nº <número>" do final do
+     assunto antes de contar, então toda intimação cai no mesmo assunto
+     "Painel de Conformidade - Intimação". Também virou seleção ÚNICA
+     (selection_mode="single" em vez de "multi") - usuário reclamou que
+     marcar um botão não desmarcava o anterior.
+
+e) BUG REAL: FILTRO MOSTRAVA A CONTAGEM CERTA MAS A LISTA NÃO SE MEXIA
+   (24/08/2026) - usuário reportou que clicar em "Concluída"/"Não
+   Concluída" atualizava a legenda ("N empresa(s) exibida(s)", calculada
+   direto em Python) mas o grid (AgGrid) continuava mostrando os dados de
+   antes. Causa raiz: exibe_aggrid() (helper COMPARTILHADO por ~20+
+   páginas deste arquivo) chama AgGrid(..., reload_data=False) com uma
+   grid_key FIXA por página ("grid_situacao_fiscal", "grid_caixa_postal")
+   - com reload_data=False, o componente ignora dado novo enquanto a key
+   não muda, então o grid "trava" na primeira renderização. NÃO mexemos
+   no exibe_aggrid() compartilhado (evitar efeito colateral nas outras
+   páginas) - em vez disso, só nessas 2 páginas a grid_key passou a ser
+   calculada a partir do estado do filtro (`hash()` de status_sel +
+   situacoes_sel ordenados, ou de assunto_sel), então toda vez que o
+   filtro muda a key muda, o Streamlit trata como um componente novo e o
+   grid remonta com o dado certo. Validado via streamlit.testing.v1.
+   AppTest simulando clique no filtro: legenda e Excel exportado bateram
+   com a contagem real da planilha (ex: 174 empresas com "DÉBITO
+   (SIEF)"). Vale lembrar esse mesmo padrão (grid_key dinâmica) se
+   qualquer OUTRA página deste arquivo ganhar filtro parecido no futuro -
+   o exibe_aggrid() compartilhado continua com reload_data=False, então o
+   sintoma vai se repetir se a key ficar fixa.
+
+f) CORES NOS FILTROS: usuário pediu cor nos botões/listas pra ajudar a
+   diferenciar visualmente. Implementado via st.container(key="...") (que
+   o Streamlit expõe como classe CSS ".st-key-<chave>") + <style> injetado
+   com st.markdown(unsafe_allow_html=True), scoped por essa classe:
+   - Status da leitura: 1º botão (Concluída) verde, 2º (Não Concluída)
+     vermelho, via seletor [role='radio']/label + :nth-of-type.
+   - As 4 listas: borda superior colorida por categoria (OMISSÕES laranja
+     #e67e22, PARCELAMENTOS azul #2e86de, DÉBITOS vermelho #e74c3c,
+     DEMAIS cinza #7f8c8d) + os chips selecionados (span[data-baseweb=
+     'tag'], seletor confirmado existindo no bundle JS do Streamlit
+     instalado) saem na mesma cor.
+   - CAIXA POSTAL: botão de assunto marcado fica teal (#16a085).
+   Seletores de `st.pills` ([data-testid='stButtonGroup'], role='radio'/
+   'checkbox', aria-checked) foram CONFIRMADOS grepando o bundle JS
+   minificado do Streamlit instalado (não é 100% garantido que a
+   estrutura DOM seja idêntica em outras versões do Streamlit - o
+   requirements.txt está fixado em streamlit==1.41.0, se subir de versão
+   e as cores dos botões pararem de aparecer, essa é a primeira suspeita).
+
+Nenhum Apps Script novo foi criado pra essa feature (é só leitura). Testes
+feitos rodando a lógica de merge/PROCV direto com pandas contra a
+planilha ao vivo (não só com dado fake) e simulando a página inteira via
+streamlit.testing.v1.AppTest (sem navegador real - essa ferramenta tem
+limitações conhecidas simulando st.pills/multiselect com format_func em
+runs consecutivos, contornado combinando as mudanças de estado num único
+.run() em vez de vários seguidos).
+
+------------------------------------------------------------------------
+34) LUPA DE PDF NA PÁGINA EMPRESAS DO DEPARTAMENTO SITUAÇÃO FISCAL
+    (24/08/2026)
+------------------------------------------------------------------------
+Pedido: em pagina_situacao_fiscal_empresas() (seção 33), colocar uma lupa
+por empresa que, ao clicar, abre o PDF de SITUAÇÃO FISCAL daquela empresa.
+Pergunta do usuário antes de implementar: como o Gestor Fiscal roda no
+Streamlit Community Cloud (sem acesso a disco/rede local - só internet, ver
+seção 10), colocar os PDFs numa pasta do Google Drive funciona? Resposta:
+sim, mesmo raciocínio já usado pra ler a GERAL via export?format=xlsx -
+qualquer coisa acessível por URL funciona a partir da nuvem.
+
+Detalhe que exigiu Apps Script novo (diferente da seção 33, que é só
+pandas): o ID de um arquivo no Drive não é previsível a partir do nome, não
+dá pra montar a URL só com Código/CNPJ - precisa de algo que LISTE a pasta
+e devolva qual arquivo bate com qual empresa. Criado
+apps_script_pdf_situacao_fiscal.gs (guardado aqui só como referência/backup,
+igual aos outros .gs - colar no editor do Apps Script e implantar
+manualmente pra valer, ver instruções dentro do próprio arquivo), ISOLADO
+dos outros 3 Apps Script do projeto (mesmo princípio da seção 4/12: um bug
+aqui não pode derrubar os outros). Só LEITURA no Drive (getFilesByType,
+nunca cria/apaga/move arquivo) - não se aplica a cautela de
+[[user-feedback-cnpj-and-sheet-safety]] sobre write-path na GERAL, porque
+esse Apps Script nem toca em planilha nenhuma.
+
+Convenção de nome de arquivo combinada com o usuário: "_<código>_SITUAÇÃO
+FISCAL MM-AAAA.pdf" (ex.: "_3_SITUAÇÃO FISCAL 08-2026.pdf") - mesmo padrão
+de prefixo "_<código>_" já usado nos arquivos de CAIXA POSTAL (seção 33c).
+doGet() do Apps Script varre a pasta inteira (DriveApp.getFolderById(
+FOLDER_ID).getFilesByType(MimeType.PDF)), extrai o código via regex
+(^_(\d+)_) e o mês/ano via regex (\d{2})-(\d{4}), e quando há mais de um
+PDF pro mesmo código (meses diferentes) fica só com o mais recente
+(comparando ano*100+mês). Devolve um JSON simples {"codigo": "url"} - o
+Python não sabe nem precisa saber de mês/ano, só do link final.
+
+Lado Python (ASBEM_Gestor_Fiscal.py): constante
+APPS_SCRIPT_PDF_SITUACAO_FISCAL_URL começa VAZIA (mesmo padrão de
+placeholder já usado em APPS_SCRIPT_CLI_FORNEC_URL, seção 12) - só funciona
+depois que o usuário publicar o .gs (precisa trocar FOLDER_ID lá dentro
+pelo ID da pasta real do Drive) e colar a URL. Até lá a página funciona
+normalmente, só a lupa não aparece e mostra uma legenda avisando que falta
+configurar. _busca_links_pdf_situacao_fiscal() (cache de 10 min, mesmo TTL
+de le_planilha_google) faz um ÚNICO GET sem parâmetro que já traz o mapa
+completo {código: link} de todas as empresas de uma vez - não faz uma
+chamada por empresa nem por clique.
+
+Implementação da lupa em si: a página parou de usar o helper compartilhado
+exibe_aggrid() (mesma decisão já tomada na seção 33e pro grid_key dinâmico -
+evitar efeito colateral nas ~20 outras páginas que usam esse helper) e
+monta o AgGrid localmente, com uma coluna extra "PDF" (dado = a própria URL
+do Drive, vazia quando não há PDF pra aquele Código) configurada com um
+cellRenderer JsCode que devolve um <a href="..." target="_blank"> com o
+emoji 🔎 - link real de âncora, não window.open()/onCellClicked, seguindo o
+mesmo padrão de "abrir PDF do Drive em nova aba" que a página CND MUNICIPAL
+já usa (linha ~3358, botão "📥 Baixar PDF"). JsCode/cellRenderer em
+st_aggrid já funcionava sem instalar nada novo (streamlit-aggrid==0.3.4 do
+requirements.txt já expõe JsCode) - só precisou importar JsCode do
+st_aggrid no topo do arquivo, allow_unsafe_jscode=True já estava ligado.
