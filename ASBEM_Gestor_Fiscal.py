@@ -2040,16 +2040,29 @@ def pagina_situacao_fiscal_empresas():
             continue
         gb.configure_column(col, filter="agTextColumnFilter")
 
+    # cellRenderer baseado em CLASSE (init/getGui), não em função que retorna string:
+    # o streamlit-aggrid usa ag-grid-react por baixo, e uma função que só devolve uma
+    # string HTML é escapada como texto puro pelo React (apareceu literalmente "<a
+    # href=..." cortado pela coluna estreita). Setando innerHTML manualmente dentro de
+    # init() contorna esse escape.
     lupa_renderer = JsCode("""
-        function(params) {
-            if (!params.value) { return ''; }
-            return '<a href="' + params.value + '" target="_blank" rel="noopener" ' +
-                   'style="font-size:18px; text-decoration:none;" title="Abrir PDF">🔎</a>';
+        class LupaPdfRenderer {
+            init(params) {
+                this.eGui = document.createElement('span');
+                if (params.value) {
+                    this.eGui.innerHTML =
+                        '<a href="' + params.value + '" target="_blank" rel="noopener" ' +
+                        'style="font-size:18px; text-decoration:none;" title="Abrir PDF">🔎</a>';
+                }
+            }
+            getGui() { return this.eGui; }
+            refresh(params) { return false; }
         }
     """)
     gb.configure_column("PDF", header_name="", cellRenderer=lupa_renderer,
                          filter=False, sortable=False, resizable=False,
-                         width=56, pinned="left", cellStyle={"textAlign": "center"})
+                         suppressSizeToFit=True, width=56, pinned="left",
+                         cellStyle={"textAlign": "center"})
 
     gb.configure_grid_options(
         domLayout="normal", floatingFilter=True, headerHeight=40, rowHeight=30,
