@@ -1998,7 +1998,12 @@ def pagina_situacao_fiscal_empresas():
                        "Status", "Data/Hora", "Situação Leitura", "Situações"]
     colunas_exibir = [c for c in colunas_exibir if c in df_filtrado.columns]
     df_tabela = _sanitiza_df(df_filtrado[colunas_exibir])
-    exibe_aggrid(df_tabela, height=450, grid_key="grid_situacao_fiscal")
+
+    # ── a chave do grid muda conforme o filtro — o AgGrid usa reload_data=False,
+    # ── então com uma chave fixa ele ignora dados novos e mantém a lista antiga ──
+    filtro_estado = "|".join([status_sel or "todos"] + sorted(situacoes_sel))
+    grid_key = f"grid_situacao_fiscal_{abs(hash(filtro_estado))}"
+    exibe_aggrid(df_tabela, height=450, grid_key=grid_key)
 
     output = BytesIO()
     df_tabela.to_excel(output, index=False)
@@ -2100,7 +2105,11 @@ def pagina_caixa_postal():
 
     colunas_exibir = ["Código", "Razão Social", "CNPJ", "Qtd. Mensagens", "Mensagens"]
     df_tabela = _sanitiza_df(df_filtrado[colunas_exibir])
-    exibe_aggrid(df_tabela, height=450, grid_key="grid_caixa_postal")
+
+    # ── a chave do grid muda conforme o filtro — o AgGrid usa reload_data=False,
+    # ── então com uma chave fixa ele ignora dados novos e mantém a lista antiga ──
+    grid_key = f"grid_caixa_postal_{abs(hash(assunto_sel or 'todos'))}"
+    exibe_aggrid(df_tabela, height=450, grid_key=grid_key)
 
     output = BytesIO()
     df_tabela.to_excel(output, index=False)
