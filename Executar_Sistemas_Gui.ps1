@@ -158,7 +158,13 @@ $btnExecutar.Add_Click({
     [System.Windows.Forms.Application]::DoEvents()
 
     New-Item -ItemType Directory -Path $pastaLocal -Force -ErrorAction SilentlyContinue | Out-Null
-    $argsRobocopy = @("$($sis.PastaOrigem)", "$pastaLocal", "/MIR", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS")
+    # Start-Process -ArgumentList no Windows PowerShell 5.1 NAO coloca aspas
+    # sozinho em cada item da lista - se origem/destino tiver espaco no
+    # caminho (ex: "SEFAZ AUTOMACAO", "CND MUNICIPAL", "MALHA FINA SEFAZ",
+    # "EMITIR NOTAS"), o Windows quebra o caminho em pedacos e o robocopy
+    # recebe tudo deslocado (erro "Parametro Invalido #3"). Por isso cada
+    # caminho precisa vir com aspas escapadas dentro da propria string.
+    $argsRobocopy = @("`"$($sis.PastaOrigem)`"", "`"$pastaLocal`"", "/MIR", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS")
     $procRobocopy = Start-Process -FilePath "robocopy.exe" -ArgumentList $argsRobocopy -NoNewWindow -Wait -PassThru
     $codigoRobocopy = $procRobocopy.ExitCode
 
