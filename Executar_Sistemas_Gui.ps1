@@ -20,7 +20,7 @@ Add-Type -AssemblyName System.Drawing
 #    page" do Windows de cada PC.
 # ----------------------------------------------------------------------
 function Buscar-Raiz {
-    $candidatos = @("H:\", "D:\ONEDRIVE\", "D:\", "E:\", "F:\", "G:\", "I:\", "J:\", "K:\")
+    $candidatos = @("A:\", "B:\", "C:\", "D:\ONEDRIVE\", "D:\", "E:\", "F:\", "G:\", "H:\", "I:\", "J:\", "K:\", "L:\", "M:\", "N:\", "O:\", "P:\", "Q:\", "R:\", "S:\", "T:\", "U:\", "V:\", "W:\", "X:\", "Y:\", "Z:\")
     foreach ($c in $candidatos) {
         if (-not (Test-Path $c)) { continue }
         $automacao = Get-ChildItem -LiteralPath $c -Filter "AUTOMA??O" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -78,7 +78,7 @@ $lblRaiz = New-Object System.Windows.Forms.Label
 if ($raiz) {
     $lblRaiz.Text = "Pasta encontrada: $raiz"
 } else {
-    $lblRaiz.Text = "AVISO: nao encontrei a pasta AUTOMACAO\PROGRAMAS\EXECUSSOES em nenhuma unidade conhecida (H:, D:\ONEDRIVE, D:, E:, F:, G:, I:, J:, K:). Confirme seu acesso a rede."
+    $lblRaiz.Text = "AVISO: nao encontrei a pasta AUTOMACAO\PROGRAMAS\EXECUSSOES em nenhuma unidade de A: a Z:. Confirme seu acesso a rede."
 }
 $lblRaiz.AutoSize = $false
 $lblRaiz.Size = New-Object System.Drawing.Size(380, 45)
