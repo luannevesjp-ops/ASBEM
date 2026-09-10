@@ -1256,7 +1256,7 @@ def pagina_empresas():
         st.error("Coluna 'Situação' não encontrada.")
         return
 
-    colunas = ["Código", "Razão Social", "CNPJ", "Regime", "Município", "Estado", "Matriz / Filial", "Situação"]
+    colunas = ["Código", "Razão Social", "CNPJ", "Regime", "Município", "Estado", "Matriz / Filial", "Situação", "FATOR R"]
     df_empresas = df_empresas[[c for c in colunas if c in df_empresas.columns]]
     df_empresas = _sanitiza_df(df_empresas)
     total_empresas = df_empresas.shape[0]
@@ -1358,6 +1358,7 @@ def pagina_empresas():
                     novo_regime = st.selectbox("Regime Tributário", opcoes_regime, index=idx_regime)
                     novo_municipio = st.text_input("Município", value=_texto(linha.get("Município")))
                     novo_estado = st.text_input("Estado (UF)", value=_texto(linha.get("Estado")), max_chars=2)
+                    novo_fator_r = st.text_input("FATOR R", value=_texto(linha.get("FATOR R")))
                     salvar = st.form_submit_button("💾 Salvar alterações", type="primary")
 
                 if salvar:
@@ -1386,6 +1387,7 @@ def pagina_empresas():
                                     "Regime": novo_regime,
                                     "Município": novo_municipio.strip().upper(),
                                     "Estado": novo_estado.strip().upper(),
+                                    "FATOR R": novo_fator_r.strip(),
                                 },
                             }]
                         }
