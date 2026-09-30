@@ -2366,7 +2366,7 @@ Detalhe que exigiu Apps Script novo (diferente da seção 33, que é só
 pandas): o ID de um arquivo no Drive não é previsível a partir do nome, não
 dá pra montar a URL só com Código/CNPJ - precisa de algo que LISTE a pasta
 e devolva qual arquivo bate com qual empresa. Criado
-apps_script_pdf_situacao_fiscal.gs (guardado aqui só como referência/backup,
+apps_script_pdf_situacao_fiscal.gs (movido em 30/09/2026 para PROGRAMA/SCRIPTS_COMPARTILHADOS/; só referência/backup,
 igual aos outros .gs - colar no editor do Apps Script e implantar
 manualmente pra valer, ver instruções dentro do próprio arquivo), ISOLADO
 dos outros 3 Apps Script do projeto (mesmo princípio da seção 4/12: um bug
