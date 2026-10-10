@@ -141,6 +141,14 @@ grid_container = st.empty()
 # FUNÇÕES AUXILIARES
 # ============================================================================
 
+def formata_mes_ano(valor):
+    # Converte a competência da planilha para MM/AAAA. Se o valor não for uma
+    # data (célula vazia, texto do cabeçalho colado na linha etc.) devolve ""
+    # em vez de quebrar a página com NaT.strftime().
+    data = pd.to_datetime(valor, errors="coerce")
+    return "" if pd.isna(data) else data.strftime("%m/%Y")
+
+
 @st.cache_data(ttl=600)
 def le_planilha_google(url: str, aba: str):
     try:
@@ -1548,7 +1556,7 @@ def pagina_empresas():
         return
 
     competencia_raw = df["PERÍODO DE COMPETÊNCIA"].iloc[0] if "PERÍODO DE COMPETÊNCIA" in df.columns else ""
-    competencia = pd.to_datetime(competencia_raw, errors='coerce').strftime("%m/%Y") if competencia_raw else ""
+    competencia = formata_mes_ano(competencia_raw) if competencia_raw else ""
 
     if "Situação" in df.columns:
         df_empresas = df[df["Situação"].astype(str).str.upper() == "ATIVA"]
@@ -1865,7 +1873,7 @@ def pagina_simples():
 
     competencia_raw = df["PERÍODO DE COMPETÊNCIA"].iloc[0] \
         if "PERÍODO DE COMPETÊNCIA" in df.columns else ""
-    competencia = pd.to_datetime(competencia_raw, errors="coerce").strftime("%m/%Y") \
+    competencia = formata_mes_ano(competencia_raw) \
         if competencia_raw else ""
 
     if "Situação" not in df.columns:
@@ -2093,7 +2101,7 @@ def _carrega_situacao_fiscal():
     }, inplace=True)
 
     mes_validos = df_leitura["Mês Leitura"].dropna()
-    mes_leitura = pd.to_datetime(mes_validos.iloc[0], errors="coerce").strftime("%m/%Y") \
+    mes_leitura = formata_mes_ano(mes_validos.iloc[0]) \
         if not mes_validos.empty else ""
 
     # ── PROCV: junta a leitura (colunas F em diante) às empresas (A-D) pelo Código ──
@@ -2531,7 +2539,7 @@ def pagina_reinf():
 
     competencia_raw = df["PERÍODO DE COMPETÊNCIA"].iloc[0] \
         if "PERÍODO DE COMPETÊNCIA" in df.columns else ""
-    competencia = pd.to_datetime(competencia_raw, errors="coerce").strftime("%m/%Y") \
+    competencia = formata_mes_ano(competencia_raw) \
         if competencia_raw else ""
 
     if "Situação" not in df.columns:
@@ -2892,7 +2900,7 @@ def pagina_dms():
 
     competencia_raw = df["PERÍODO DE COMPETÊNCIA"].iloc[0] \
         if "PERÍODO DE COMPETÊNCIA" in df.columns else ""
-    competencia = pd.to_datetime(competencia_raw, errors="coerce").strftime("%m/%Y") \
+    competencia = formata_mes_ano(competencia_raw) \
         if competencia_raw else ""
 
     if "Situação" not in df.columns:
@@ -3140,7 +3148,7 @@ def pagina_rest():
 
     competencia_raw = df["PERÍODO DE COMPETÊNCIA"].iloc[0] \
         if "PERÍODO DE COMPETÊNCIA" in df.columns else ""
-    competencia = pd.to_datetime(competencia_raw, errors="coerce").strftime("%m/%Y") \
+    competencia = formata_mes_ano(competencia_raw) \
         if competencia_raw else ""
 
     if "Situação" not in df.columns:
@@ -3412,7 +3420,7 @@ def pagina_sefaz():
 
     competencia_raw = df["PERÍODO DE COMPETÊNCIA"].iloc[0] \
         if "PERÍODO DE COMPETÊNCIA" in df.columns else ""
-    competencia = pd.to_datetime(competencia_raw, errors="coerce").strftime("%m/%Y") \
+    competencia = formata_mes_ano(competencia_raw) \
         if competencia_raw else ""
 
     if "Situação" not in df.columns:
@@ -3659,7 +3667,7 @@ def pagina_cnd_municipal():
 
     competencia_raw = df["PERÍODO DE COMPETÊNCIA"].iloc[0] \
         if "PERÍODO DE COMPETÊNCIA" in df.columns else ""
-    competencia = pd.to_datetime(competencia_raw, errors="coerce").strftime("%m/%Y") \
+    competencia = formata_mes_ano(competencia_raw) \
         if competencia_raw else ""
 
     df_cnd = df[df["Situação"].astype(str).str.upper() == "ATIVA"].copy() \
