@@ -1264,12 +1264,18 @@ if "menu_area" not in st.session_state:
 
 def tela_login():
     st.markdown("<h1 style='text-align:center; color:#0f4fa3;'>Gestão Fiscal</h1>", unsafe_allow_html=True)
-    senha = st.text_input("Senha", type="password", max_chars=20)
-    if st.button("Entrar"):
+    # campo estreito e centralizado; form → Enter também entra
+    _, col_login, _ = st.columns([2, 1, 2])
+    with col_login:
+        with st.form("form_login", border=False):
+            senha = st.text_input("Senha", type="password", max_chars=20)
+            entrar = st.form_submit_button("Entrar", type="primary", use_container_width=True)
+    if entrar:
         if senha == "ASBEM":
             st.session_state["autenticado"] = True
+            st.rerun()
         else:
-            st.error("Senha incorreta.")
+            col_login.error("Senha incorreta.")
 
 if not st.session_state["autenticado"]:
     tela_login()
