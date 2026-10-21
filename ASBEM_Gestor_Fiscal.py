@@ -1564,7 +1564,7 @@ def _validar_lote_empresas(df_lote: pd.DataFrame, cnpjs_existentes: set) -> pd.D
 # mesma URL em todos os escritórios, cada um manda o seu EMPRESAS_ESCRITORIO.
 #   - incluir: a empresa entra na 1ª linha com a coluna A vazia e sem fórmula;
 #   - excluir: NÃO apaga nada — só troca a Situação da empresa para INATIVA.
-EMPRESAS_SCRIPT_URL = ""
+EMPRESAS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyo2BMRE4g1KlLjtvezKC5DvJ3T7hqNNfwfyjrsmzVcPFarJIIFFUJS9CAuGMb3Ts6anw/exec"
 EMPRESAS_ESCRITORIO = "ASBEM"
 
 _REGIMES_EMPRESA = ["SIMPLES NACIONAL", "LUCRO PRESUMIDO", "LUCRO REAL", "MEI",
@@ -2383,6 +2383,8 @@ def _busca_links_pdf_situacao_fiscal():
         resp = requests.get(APPS_SCRIPT_PDF_SITUACAO_FISCAL_URL, timeout=20)
         resp.raise_for_status()
         dados = resp.json()
+        if "erro" in dados:   # escritório sem pasta no script compartilhado
+            return {}
         return {str(k).strip(): str(v).strip() for k, v in dados.items()}
     except Exception:
         return {}
