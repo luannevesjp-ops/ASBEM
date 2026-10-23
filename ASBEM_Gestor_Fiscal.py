@@ -1380,7 +1380,8 @@ st.sidebar.markdown("<hr style='margin: 8px 0;'>", unsafe_allow_html=True)
 if st.session_state["menu_area"] == "FISCAL":
     paginas_disponiveis = ["EMPRESAS", "SIMPLES NACIONAL", "REINF", "DCTF WEB",
                            "DMS", "SERVIÇOS TOMADOS", "SEFAZ", "LEITURA XML DMS", "LEITURA XML REST",
-                           "SEFAZ ALTERAÇÃO QUANTIDADE NOTAS", "CLIENTES/FORNEC CNPJ"]
+                           "SEFAZ ALTERAÇÃO QUANTIDADE NOTAS", "CLIENTES/FORNEC CNPJ",
+                           "CONSULTA LIVROS FISCAIS"]
 
 elif st.session_state["menu_area"] == "PARALEGAL":
     paginas_disponiveis = ["DASHBOARD", "EMPRESAS", "CERTIDÕES", "SEM ACESSO", "ALVARÁS"]
@@ -6761,6 +6762,88 @@ def pagina_alvaras():
 
 
 # ============================================================================
+# CONSULTA LIVROS FISCAIS (menu FISCAL)
+# ============================================================================
+# O painel vem pronto do programa desktop "Consulta Acesso Contabilista" (SEFAZ
+# GO): Painel_Livros_Fiscais.html (o "sistema", com dados e filtros dentro) +
+# Livros_Fiscais.xlsx. Os arquivos ficam na pasta pública LIVROS FISCAIS do
+# Drive, uma subpasta por escritório (nome comparado sem acento) — lida pelo
+# embeddedfolderview, igual às CERTIDÕES, sem Apps Script. Escritório novo = só
+# criar a subpasta com o nome dele.
+LIVROS_DRIVE_PASTA = "1ynyG2qYd5kIF24npE6FsiFkeP8GyvDRo"
+LIVROS_ESCRITORIO  = "ASBEM"   # nome da subpasta do escritório na pasta LIVROS FISCAIS
+
+
+@st.cache_data(ttl=600)
+def _livros_arquivos():
+    """(painéis [(nome, id)], planilhas [(nome, id)], erro). Escritório sem
+    subpasta → listas vazias e erro vazio."""
+    try:
+        escr = {_sem_acento(n): i for n, i, pasta in _drive_lista_pasta(LIVROS_DRIVE_PASTA) if pasta}
+        pasta_escr = escr.get(_sem_acento(LIVROS_ESCRITORIO))
+        if not pasta_escr:
+            return [], [], ""
+        arquivos = [(n, i) for n, i, pasta in _drive_lista_pasta(pasta_escr) if not pasta]
+        paineis = sorted((a for a in arquivos if a[0].lower().endswith(".html")), reverse=True)
+        planilhas = sorted((a for a in arquivos if a[0].lower().endswith(".xlsx")), reverse=True)
+        return paineis, planilhas, ""
+    except Exception as e:
+        return [], [], str(e)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _livros_baixar(arq_id):
+    resp = requests.get(f"https://drive.google.com/uc?export=download&id={arq_id}", timeout=60)
+    resp.raise_for_status()
+    return resp.content
+
+
+def pagina_livros_fiscais():
+    import streamlit.components.v1 as components
+    st.markdown("<h2>CONSULTA LIVROS FISCAIS</h2>", unsafe_allow_html=True)
+
+    paineis, planilhas, erro = _livros_arquivos()
+    if erro:
+        st.error(f"Não consegui ler a pasta LIVROS FISCAIS do Drive: {erro}")
+        return
+    if not paineis:
+        st.info(f"Ainda não há painel na pasta LIVROS FISCAIS/{LIVROS_ESCRITORIO} do Drive. "
+                "Coloque lá o Painel_Livros_Fiscais.html gerado pela Consulta Livros Fiscais.")
+        return
+
+    col_sel, col_bt1, col_bt2, col_bt3 = st.columns([3, 1, 1, 1], vertical_alignment="bottom")
+    with col_sel:
+        if len(paineis) > 1:
+            nome, arq_id = st.selectbox("Painel", paineis, format_func=lambda a: a[0], key="livros_painel")
+        else:
+            nome, arq_id = paineis[0]
+            st.caption(f"Painel: {nome}")
+    with col_bt1:
+        if st.button("🔄 Atualizar", use_container_width=True, key="livros_atualizar"):
+            _livros_arquivos.clear()
+            _livros_baixar.clear()
+            st.rerun()
+
+    try:
+        with st.spinner("Carregando o painel do Drive..."):
+            conteudo = _livros_baixar(arq_id)
+    except Exception as e:
+        st.error(f"Não consegui baixar o painel do Drive: {e}")
+        return
+
+    with col_bt2:
+        st.download_button("⛶ Tela cheia", data=conteudo, file_name=nome, mime="text/html",
+                           use_container_width=True, key="livros_baixar_html",
+                           help="Baixa o painel para abrir no navegador, em tela cheia.")
+    with col_bt3:
+        if planilhas:
+            st.link_button("📥 Excel", f"https://drive.google.com/file/d/{planilhas[0][1]}/view",
+                           use_container_width=True)
+
+    components.html(conteudo.decode("utf-8", errors="replace"), height=950, scrolling=True)
+
+
+# ============================================================================
 # ROTEAMENTO
 # ============================================================================
 
@@ -6799,6 +6882,8 @@ with st.session_state.main_container.container():
         pagina_sem_acesso()
     elif pagina == "SEFAZ ALTERAÇÃO QUANTIDADE NOTAS":
         pagina_sefaz_alteracao_quantidade_notas()
+    elif pagina == "CONSULTA LIVROS FISCAIS":
+        pagina_livros_fiscais()
     elif pagina == "CLIENTES/FORNEC CNPJ":
         pagina_clientes_fornecedores_cnpj()
     elif pagina == "CERTIFICADOS":
